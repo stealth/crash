@@ -1,3 +1,9 @@
+#
+# setup your build environment to build for Android:
+# 1. Install NDK and Android git (at least the openssl fork)
+# 2. symlink $NDK/platforms/android-9/arch-arm/usr/include/openssl to /path/to/android.git/external/openssl/include/openssl/
+# 3. copy emulators libssl.so and libcrypto.so to $NDK/platforms/android-9/arch-arm/usr/lib/
+
 
 ROOT=/opt
 NDK=android-ndk-r8b
