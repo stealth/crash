@@ -1,0 +1,63 @@
+
+ROOT=/opt
+NDK=android-ndk-r8b
+
+PREFIX=$(ROOT)/$(NDK)/toolchains/arm-linux-androideabi-4.4.3/prebuilt/linux-x86/bin/arm-linux-androideabi-
+SYSROOT=--sysroot=$(ROOT)/$(NDK)/platforms/android-9/arch-arm/
+INC=-I$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/include\
+    -I$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/libs/armeabi/include
+LIB=-Wl,$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/libs/armeabi/libgnustl_static.a
+
+CXX=$(PREFIX)c++ $(INC) $(SYSROOT)
+CFLAGS=-Wall -O2 -DHAVE_UNIX98 -pedantic -DANDROID
+LD=$(PREFIX)c++ $(SYSROOT)
+STRIP=strip
+
+all: crashd crashc
+
+clean:
+	rm -rf *.o
+
+crashc: net.o misc.o crashc.o config.o global.o
+	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o $(LIB) -lssl -ldl -lcrypto -o crashc
+	$(STRIP) crashc
+
+crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o
+	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o $(LIB) -lssl -ldl -lcrypto -o crashd
+	$(STRIP) crashd
+
+server.o: server.cc
+	$(CXX) $(CFLAGS) -c server.cc
+
+session.o: session.cc
+	$(CXX) $(CFLAGS) -c session.cc
+
+net.o: net.cc
+	$(CXX) $(CFLAGS) -c net.cc
+
+misc.o: misc.cc
+	$(CXX) $(CFLAGS) -c misc.cc
+
+config.o: config.cc
+	$(CXX) $(CFLAGS) -c config.cc
+
+pty.o: pty.cc
+	$(CXX) $(CFLAGS) -c pty.cc
+
+pty98.o: pty98.cc
+	$(CXX) $(CFLAGS) -c pty98.cc
+
+global.o: global.cc
+	$(CXX) $(CFLAGS) -c global.cc
+
+log.o: log.cc
+	$(CXX) $(CFLAGS) -c log.cc
+
+crashd.o: crashd.cc
+	$(CXX) $(CFLAGS) -c crashd.cc
+
+crashc.o: crashc.cc
+	$(CXX) $(CFLAGS) -c crashc.cc
+
+
+
