@@ -1,5 +1,5 @@
 CXX=c++
-CFLAGS=-w -O2 -ansi -DHAVE_UNIX98 -pedantic -std=c++11
+CFLAGS=-w -O2 -DHAVE_UNIX98 -pedantic -ansi -std=c++11
 INC=
 LD=c++
 STRIP=strip

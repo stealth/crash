@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2014 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -37,7 +37,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#include <utmpx.h>
 #include <fcntl.h>
 #include "log.h"
 #include "config.h"
@@ -74,12 +73,20 @@ logger &syslog()
 }
 
 
-#ifdef ANDROID
+#if defined ANDROID || defined EMBEDDED
 void logger::login(const string &dev, const string &user, const string &host)
 {
 }
 
+
+void logger::logout(pid_t pid)
+{
+}
+
+
 #else
+
+#include <utmpx.h>
 
 void logger::login(const string &dev, const string &user, const string &host)
 {
@@ -111,14 +118,6 @@ void logger::login(const string &dev, const string &user, const string &host)
 	endutxent();
 }
 
-#endif
-
-#ifdef ANDROID
-void logger::logout(pid_t pid)
-{
-}
-
-#else
 
 void logger::logout(pid_t pid)
 {

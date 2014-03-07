@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2014 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -373,6 +373,18 @@ int server_session::handle()
 		return -1;
 	}
 
+	SSL_set_fd(ssl, sock);
+
+	if (SSL_accept(ssl) <= 0) {
+		err = "server_session::handle::SSL_accept:";
+		err += ERR_error_string(ERR_get_error(), NULL);
+		return -1;
+	}
+
+	// Get our own X509 for authentication input. This has moved below
+	// SSL_accept() since OSX ships with buggy OpenSSL that segfaults
+	// with NULL ptr access if the SSL object is not connected: search for
+	// 'NULL ptr deref when calling SSL_get_certificate'
 	X509 *cert = SSL_get_certificate(ssl);
 	if (!cert) {
 		err = "server_session::handle::SSL_get_certificate:";
@@ -387,13 +399,6 @@ int server_session::handle()
 		return -1;
 	}
 
-	SSL_set_fd(ssl, sock);
-
-	if (SSL_accept(ssl) <= 0) {
-		err = "server_session::handle::SSL_accept:";
-		err += ERR_error_string(ERR_get_error(), NULL);
-		return -1;
-	}
 
 	// authenticate, this already sets EGID/GID and groups
 	// but NOT EUID/UID!
@@ -404,7 +409,6 @@ int server_session::handle()
 	memset(&iti, 0, sizeof(iti));
 	setitimer(ITIMER_REAL, &iti, NULL);
 
-	//TODO: reset timer
 	string l = "SUCCESS: opening session for user '";
 	l += user;
 	l += "'";
