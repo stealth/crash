@@ -1,0 +1,53 @@
+CXX=c++
+CFLAGS=-w -O2 -ansi -DHAVE_UNIX98 -pedantic -std=c++11
+INC=
+LD=c++
+STRIP=strip
+LIBS=-lssl -lcrypto
+
+all: crashd crashc
+
+clean:
+	rm -rf *.o
+
+crashc: net.o misc.o crashc.o config.o global.o
+	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o $(LIBS) -o crashc
+	$(STRIP) crashc
+
+crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o
+	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o $(LIBS) -o crashd
+	$(STRIP) crashd
+
+server.o: server.cc
+	$(CXX) $(CFLAGS) -c server.cc
+
+session.o: session.cc
+	$(CXX) $(CFLAGS) -c session.cc
+
+net.o: net.cc
+	$(CXX) $(CFLAGS) -c net.cc
+
+misc.o: misc.cc
+	$(CXX) $(CFLAGS) -c misc.cc
+
+config.o: config.cc
+	$(CXX) $(CFLAGS) -c config.cc
+
+pty.o: pty.cc
+	$(CXX) $(CFLAGS) -c pty.cc
+
+pty98.o: pty98.cc
+	$(CXX) $(CFLAGS) -c pty98.cc
+
+global.o: global.cc
+	$(CXX) $(CFLAGS) -c global.cc
+
+log.o: log.cc
+	$(CXX) $(CFLAGS) -c log.cc
+
+crashd.o: crashd.cc
+	$(CXX) $(CFLAGS) -c crashd.cc
+
+crashc.o: crashc.cc
+	$(CXX) $(CFLAGS) -c crashc.cc
+

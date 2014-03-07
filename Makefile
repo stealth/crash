@@ -48,11 +48,17 @@ keys:
 	openssl genrsa -out authkey.priv -aes256 4096
 	openssl rsa -in authkey.priv -pubout -out authkey.pub
 	@echo
+	@echo
 	@echo "Your serverkey is in serverkey.{priv,pub} and authentication (user-) key in"
-	@echo "authkey.{priv,pub}. Copy authkey.pub to ~./crash/authorized_keys on server"
+	@echo "authkey.{priv,pub}. Copy authkey.pub to ~/.crash/authorized_keys on remote server"
+	@evho "and use '-i authkey.priv' on the client to connect to it"
 	@echo
 	@echo "Your known-host key which belongs to serverkey.priv is in HK_127.0.0.1"
-	@echo "you can use it with 'crashc -K'"
+	@echo "and you can use it with '-K HK_127.0.0.1' on the client."
+	@echo
+	@echo "For example you can start './crashd' as root on localhost and use"
+	@echo "'./crashc -K ./HK_127.0.0.1 -H 127.0.0.1 -l user -i authkey.priv'"
+	@echo "to login."
 	@echo
 
 crashc: net.o misc.o crashc.o config.o global.o

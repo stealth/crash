@@ -37,7 +37,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#include <utmp.h>
+#include <utmpx.h>
 #include <fcntl.h>
 #include "log.h"
 #include "config.h"
@@ -86,56 +86,29 @@ void logger::login(const string &dev, const string &user, const string &host)
 	if (config::silent)
 		return;
 
-	struct utmp ut;
-	memset(&ut, 0, sizeof(ut));
-#ifndef __FreeBSD__
-	ut.ut_pid = getpid();
-	ut.ut_type = USER_PROCESS;
-#endif
+	struct utmpx utx;
+	memset(&utx, 0, sizeof(utx));
+
+	utx.ut_pid = getpid();
+	utx.ut_type = USER_PROCESS;
+
 	const char *ptr = NULL;
 	if (strstr(dev.c_str(), "/dev/"))
 		ptr = dev.c_str() + 5;
 	else
 		ptr = dev.c_str();
 
-	snprintf(ut.ut_line, sizeof(ut.ut_line), "%s", ptr);
-	snprintf(ut.ut_name, sizeof(ut.ut_name), "%s", user.c_str());
-#ifndef __FreeBSD__
-	snprintf(ut.ut_id, sizeof(ut.ut_id), "%04x", ut.ut_pid);
-#endif
-#ifndef __sun__
-	snprintf(ut.ut_host, sizeof(ut.ut_host), "%s", host.c_str());
-#endif
+	snprintf(utx.ut_line, sizeof(utx.ut_line), "%s", ptr);
+	snprintf(utx.ut_user, sizeof(utx.ut_user), "%s", user.c_str());
+	snprintf(utx.ut_id, sizeof(utx.ut_id), "%04x", utx.ut_pid);
 
-	struct timeval tv;
+	timeval tv;
 	gettimeofday(&tv, NULL);
-	ut.ut_time = tv.tv_sec;
+	memcpy(&utx.ut_tv, &tv, sizeof(tv));
 
-#ifdef __sun__
-	utmpname("/var/adm/utmpx");
-#else
-#if !defined __FreeBSD__
-	utmpname("/var/run/utmp");
-#endif
-#endif
-
-#ifdef __FreeBSD__
-	::login(&ut);
-#else
-	setutent();
-	pututline(&ut);
-	endutent();
-#endif
-
-#ifdef __sun__
-	int fd = open("/var/adm/wtmpx", O_WRONLY|O_APPEND);
-#else
-	int fd = open("/var/log/wtmp", O_WRONLY|O_APPEND);
-#endif
-	if (fd < 0)
-		return;
-	write(fd, &ut, sizeof(struct utmp));
-	close(fd);
+	setutxent();
+	pututxline(&utx);
+	endutxent();
 }
 
 #endif
@@ -152,80 +125,25 @@ void logger::logout(pid_t pid)
 	if (config::silent)
 		return;
 
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-
-	struct utmp ut;
-	memset(&ut, 0, sizeof(ut));
-
-#ifdef __sun__
-	utmpname("/var/adm/utmpx");
-#else
-#if !defined __FreeBSD__
-	utmpname("/var/run/utmp");
-#endif
-#endif
-
-#ifndef __FreeBSD__
-	setutent();
-	struct utmp *t = NULL;
+	timeval tv;
+	setutxent();
+	struct utmpx *t = NULL;
 	for (;;) {
-#if !defined __sun__ && !defined EMBEDDED
-		getutent_r(&ut, &t);
-#else
-		t = getutent();
-#endif
+		t = getutxent();
+
 		if (!t)
 			break;
 		if (t->ut_pid != pid || t->ut_type != USER_PROCESS)
 			continue;
 		t->ut_type = DEAD_PROCESS;
-		t->ut_time = tv.tv_sec;
-		memset(t->ut_name, 0, sizeof(t->ut_name));
-		setutent();
-		pututline(t);
+		gettimeofday(&tv, NULL);
+		memcpy(&t->ut_tv, &tv, sizeof(tv));
+		memset(t->ut_user, 0, sizeof(t->ut_user));
+		pututxline(t);
 		break;
 	}
-	endutent();
+	endutxent();
 
-#ifdef __sun__
-	utmpname("/var/run/wtmpx");
-#else
-	utmpname("/var/log/wtmp");
-#endif
-	setutent();
-	for (;;) {
-#if !defined __sun__ && !defined EMBEDDED
-		getutent_r(&ut, &t);
-#else
-		t = getutent();
-#endif
-		if (!t)
-			break;
-		if (t->ut_pid != pid || t->ut_type != USER_PROCESS)
-			continue;
-		t->ut_type = DEAD_PROCESS;
-		t->ut_time = tv.tv_sec;
-		t->ut_exit.e_termination = 0;
-		t->ut_exit.e_exit = 0;
-		memset(t->ut_name, 0, sizeof(t->ut_name));
-#ifndef __sun__
-		memset(t->ut_host, 0, sizeof(t->ut_host));
-#endif
-		break;
-	}
-	endutent();
-
-#ifdef __sun__
-	int fd = open("/var/adm/wtmpx", O_WRONLY|O_APPEND);
-#else
-	int fd = open("/var/log/wtmp", O_WRONLY|O_APPEND);
-#endif
-	if (fd < 0)
-		return;
-	write(fd, t, sizeof(struct utmp));
-	close(fd);
-#endif // ! __FreeBSD__
 }
 
 #endif
