@@ -73,6 +73,8 @@ class client_session {
 	EVP_PKEY *pubkey, *privkey;
 	struct termios tattr, old_tattr;
 
+	uint16_t my_major, my_minor;
+
 protected:
 
 	int handle_command(const string &, char *, unsigned short);
@@ -104,9 +106,9 @@ const size_t client_session::const_message_size = 1024;
 
 
 client_session::client_session() :
-	sock_fd(-1), peer_fd(-1), sock(NULL), err(""), 
+	sock_fd(-1), peer_fd(-1), sock(NULL), err(""),
 	ssl_ctx(NULL), ssl_method(NULL), ssl(NULL),
-	pubkey(NULL), privkey(NULL)
+	pubkey(NULL), privkey(NULL), my_major(1), my_minor(1)
 {
 
 }
@@ -376,10 +378,10 @@ int client_session::authenticate()
 
 	unsigned char resp[const_message_size];
 	EVP_MD_CTX md_ctx;
-	const EVP_MD *sha1 = EVP_sha1();
+	const EVP_MD *sha512 = EVP_sha512();
 
 	EVP_MD_CTX_init(&md_ctx);
-	if (EVP_SignInit_ex(&md_ctx, sha1, NULL) != 1)
+	if (EVP_SignInit_ex(&md_ctx, sha512, NULL) != 1)
 		return -1;
 	// 'challenge' that was sent by server
 	if (EVP_SignUpdate(&md_ctx, challenge, clen) != 1)
@@ -408,7 +410,7 @@ int client_session::authenticate()
 		return -1;
 
 	char sbuf[const_message_size];
-	snprintf(sbuf, sizeof(sbuf), "A:crash-1.000:%32s:%hu:%s:token:%hu:",
+	snprintf(sbuf, sizeof(sbuf), "A:crash-1.001:%32s:%hu:%s:token:%hu:",
 	         config::user.c_str(),
 	         (unsigned short)config::cmd.length(), config::cmd.c_str(),
 	         (unsigned short)resplen);
@@ -435,7 +437,7 @@ int client_session::authenticate()
 
 int client_session::handle()
 {
-	unsigned char rbanner[1024];
+	char rbanner[1024];
 
 	FILE *fstream = fdopen(peer_fd, "r+");
 	if (!fstream) {
@@ -447,7 +449,21 @@ int client_session::handle()
 	setbuffer(fstream, NULL, 0);
 	SSL_set_fd(ssl, peer_fd);
 
-	fgets((char *)rbanner, sizeof(rbanner), fstream);
+	memset(rbanner, 0, sizeof(rbanner));
+	fgets(rbanner, sizeof(rbanner) - 1, fstream);
+
+	uint16_t major = 0, minor = 0;
+	if (sscanf(rbanner, "1000 crashd-%hu.%hu OK\r\n", &major, &minor) != 2) {
+		err = "client_session::handle:: Invalid remote banner string.";
+		return -1;
+	}
+
+	if (config::verbose) {
+		if ((major != my_major || minor != my_minor))
+			printf("crash: Different versions. Authentication may fail.\n");
+		else
+			printf("crash: Major/Minor versions match (%hu/%hu)\n", major, minor);
+	}
 
 	if (SSL_connect(ssl) <= 0) {
 		err = "client_session::handle::SSL_connect:";
@@ -633,6 +649,7 @@ int main(int argc, char **argv)
 		}
 	}
 
+	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = sig_winch;
 	sigaction(SIGWINCH, &sa, NULL);
 

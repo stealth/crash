@@ -103,7 +103,7 @@ $ openssl rsa -in privkey.pem -pubout -out pubkey.pem
 copy pubkey.pem to ~/.crash/authorized_keys on the remote box, and
 use privkey.pem for the "crashc -i" argument.
 
-Auth-Key sizes larger than 4096 bit (as used above) must not be used;
+Auth-Key sizes larger than 7500 bit must not be used;
 the tokens do not fit into the auth handshake otherwise.
 
 crashc is using the .crash/ subdir by default to check for

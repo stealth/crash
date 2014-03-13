@@ -57,7 +57,8 @@ extern "C" {
 
 using namespace std;
 
-string server_session::banner = "1000 crashd-1.000 OK\r\n";
+// change in client my_major, my_minor accordingly
+string server_session::banner = "1000 crashd-1.001 OK\r\n";
 enum {
 	const_message_size = 1024
 };
@@ -138,11 +139,11 @@ int server_session::authenticate()
 	if (RAND_bytes(rand, sizeof(rand)) != 1)
 		return -1;
 	EVP_MD_CTX md_ctx;
-	const EVP_MD *sha1 = EVP_sha1();
-	if (!sha1)
+	const EVP_MD *sha512 = EVP_sha512();
+	if (!sha512)
 		return -1;
 	EVP_MD_CTX_init(&md_ctx);
-	if (EVP_DigestInit_ex(&md_ctx, sha1, NULL) != 1)
+	if (EVP_DigestInit_ex(&md_ctx, sha512, NULL) != 1)
 		return -1;
 	if (EVP_DigestUpdate(&md_ctx, rand, sizeof(rand)) != 1)
 		return -1;
@@ -152,8 +153,8 @@ int server_session::authenticate()
 	char sbuf[const_message_size];
 
 	memset(sbuf, 0, sizeof(sbuf));
-	sprintf(sbuf, "A:sign:%hu:", 160/8);
-	memcpy(sbuf + strlen(sbuf), md, 160/8);
+	sprintf(sbuf, "A:sign:%hu:", EVP_MD_size(sha512));
+	memcpy(sbuf + strlen(sbuf), md, EVP_MD_size(sha512));
 
 	err = "server_session::authenticate:: auth exchange";
 
@@ -314,7 +315,7 @@ int server_session::authenticate()
 		if (!fstream)
 			return -1;
 
-		// verify signature over the sha1 hash of the
+		// verify signature over the sha hash of the
 		// rand-bytes array
 		EVP_PKEY *pkey = PEM_read_PUBKEY(fstream, NULL, NULL, NULL);
 		fclose(fstream);
@@ -327,9 +328,9 @@ int server_session::authenticate()
 		if (config::uid_change)
 			setreuid(0, 0);
 
-		if (EVP_VerifyInit_ex(&md_ctx, sha1, NULL) != 1)
+		if (EVP_VerifyInit_ex(&md_ctx, sha512, NULL) != 1)
 			return -1;
-		if (EVP_VerifyUpdate(&md_ctx, md, 160/8) != 1) // 'challenge' that was sent to client
+		if (EVP_VerifyUpdate(&md_ctx, md, EVP_MD_size(sha512)) != 1) // 'challenge' that was sent to client
 			return -1;
 		int pubkeylen = i2d_PublicKey(pubkey, NULL);
 		if (pubkeylen <= 0 || pubkeylen >= 32000)
