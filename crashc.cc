@@ -471,6 +471,13 @@ int client_session::handle()
 		return -1;
 	}
 
+	if (config::verbose) {
+		char ssl_desc[256];
+		memset(ssl_desc, 0, sizeof(ssl_desc));
+		SSL_CIPHER_description(SSL_get_current_cipher(ssl), ssl_desc, sizeof(ssl_desc) - 1);
+		printf("crash: Using %s", ssl_desc);
+	}
+
 	if (check_server_key() != 1) {
 		return -1;
 	}
