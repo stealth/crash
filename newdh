@@ -1,0 +1,8 @@
+#!/usr/bin/perl
+
+print "Generating 1024 bit DH parameters ...\n\n";
+system("openssl dhparam -noout -C 1024 > dh1024.cc");
+
+print "Generating 512 bit DH parameters ...\n\n";
+system("openssl dhparam -noout -C 512 > dh512.cc");
+

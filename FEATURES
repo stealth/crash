@@ -43,4 +43,5 @@ o intentionally does not leak any infos (except tty sizes)
   user-names, hostnames or other settings to allow maximum
   privacy
 
+o supports Perfect Forward Secrecy via DH Kex
 

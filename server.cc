@@ -58,6 +58,16 @@ using namespace std;
 
 unsigned short Server::min_time_between_reconnect = 3;
 
+
+#ifdef USE_CIPHERS
+string ciphers = USE_CIPHERS;
+#else
+string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!ADH:kDHE:RSA:AES256:SHA256:SHA384:IDEA:@STRENGTH";
+#endif
+
+extern int enable_dh(SSL_CTX *);
+
+
 Server::Server()
 	: sock_fd(-1), sock(NULL), ssl_method(NULL), ssl_ctx(NULL)
 {
@@ -107,6 +117,21 @@ int Server::setup()
 #ifdef SSL_OP_NO_COMPRESSION
 	SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
 #endif
+
+	// check for DHE and enable it if there are parameters
+	string::size_type dhe = ciphers.find("kDHE");
+	if (dhe != string::npos) {
+		if (enable_dh(ssl_ctx) != 1)
+			ciphers.erase(dhe, 4);
+	}
+
+	if (SSL_CTX_set_cipher_list(ssl_ctx, ciphers.c_str()) != 1) {
+		err = "Server::setup::SSL_CTX_set_cipher_list:";
+		err += ERR_error_string(ERR_get_error(), NULL);
+		return -1;
+	}
+
+
 
 	if (config::v6)
 		sock = new (nothrow) Socket(PF_INET6);

@@ -65,8 +65,8 @@ crashc: net.o misc.o crashc.o config.o global.o
 	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o $(LIBS) -o crashc
 	$(STRIP) crashc
 
-crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o
-	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o $(LIBS) -o crashd
+crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o
+	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o $(LIBS) -o crashd
 	$(STRIP) crashd
 
 server.o: server.cc
@@ -102,5 +102,6 @@ crashd.o: crashd.cc
 crashc.o: crashc.cc
 	$(CXX) $(CFLAGS) -c crashc.cc
 
-
+dh.o: dh.cc dh512.cc dh1024.cc
+	$(CXX) $(CFLAGS) -c dh.cc
 

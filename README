@@ -7,13 +7,13 @@ Build
 =====
 
 Just type "make", on BSD type "make -f Makefile.bsd", for embedded systems please
-see at the end of this document. crash was successfully tested on Linux (openSUSE 10.3, 11.1),
-FreeBSD 7.2 and OpenSolaris. It probably runs on a lot of other Linux
+see at the end of this document. crash was successfully tested on Linux (openSUSE 10.3, 11.1, 12.3, 13.1),
+FreeBSD 7.2, OpenSolaris and OSX 10.8. It probably runs on a lot of other Linux
 and BSD's but I was not able to test it there yet.
-The utmp/wtmp logging probably needs to be tuned; BSD is just messy there.
 
 To generate server and auth keys, type "make keys" or see further
-instructions.
+instructions. If you want to use ephemeral keying (aka PFS), invoke
+'./newdh' before make in order to generate DH parameters.
 
 Running
 =======
