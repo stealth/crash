@@ -1,12 +1,12 @@
-CRyptographic Administration SHell -- crash
-===========================================
+CRyptographic Admin SHell -- crash
+==================================
 
 
 Build
 -----
 
-You need to have a quite current version of _openssl_ instelled.
-The, just
+You need to have a quite current version of _openssl_ installed.
+Then, just
 
     $ make
 
@@ -29,14 +29,14 @@ invoke
 
     $ ./newdh
 
-before `make`_ in order to generate DH parameters before the build.
+before `make` in order to generate DH parameters before the build.
 
 
 Run
 ---
 
 _crash_ does not need any config or option files to run. Its easy and
-straight forward to use. Anything can be enabled/disabled/featured by
+straight forward to use. Anything can be enabled/disabled by
 runtime switches:
 
 ```
@@ -138,8 +138,8 @@ a webserver by checking __$QUERY_STRING__ environment variable. It parses
 and converts the query-string into arguments it understands. It
 does not translate %2F etc characters! They should not be needed,
 since spaces, '(' and other weird characters do not make sense when
-calling crashd. Arguments that dont have a parameter such as -U
-have to be given "=1" argument to enable it, such as in:
+calling crashd. Arguments that dont have a parameter such as `-U`
+have to be given `=1` argument to enable it, such as in:
 
 ```
 http://127.0.0.1/cgi-bin/crashd?-K=/path/to/serverkey.pem&    \
@@ -169,7 +169,7 @@ _crashd_ is using _mkstemp()_ to store the key files temporarily, with
 mode 0444 (world readable!) since it needs to access authentication
 files as user. So be warned that, if you have users, they may read
 the private key used during SSL handshake. After all, its just an
-emergency mode!!! Stripping the _crashd _binary is not possible after
+emergency mode!!! Stripping the _crashd_ binary is not possible after
 appending the keys, or they will get lost.
 Back-connect etc. also work in CGI mode as well.
 If using that, client should use `-K` switch to tell client which key to use
