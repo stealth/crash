@@ -59,10 +59,10 @@ using namespace std;
 unsigned short Server::min_time_between_reconnect = 3;
 
 
-#ifdef USE_CIPHERS
-string ciphers = USE_CIPHERS;
+#ifdef USE_SCIPHERS
+string ciphers = USE_SCIPHERS;
 #else
-string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!ADH:kDHE:RSA:AES256:SHA256:SHA384:IDEA:@STRENGTH";
+string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!3DES:!ADH:kDHE:RSA:AES256:AESGCM:SHA256:SHA384:@STRENGTH";
 #endif
 
 extern int enable_dh(SSL_CTX *);
@@ -88,10 +88,10 @@ int Server::setup()
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
 	OpenSSL_add_all_digests();
-	ssl_method = TLSv1_server_method();
+	ssl_method = SSLv23_server_method();
 
 	if (!ssl_method) {
-		err = "Server::setup::TLSv1_server_method:";
+		err = "Server::setup::SSLv23_server_method:";
 		err += ERR_error_string(ERR_get_error(), NULL);
 		return -1;
 	}
@@ -114,9 +114,17 @@ int Server::setup()
 		return -1;
 	}
 
+	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_SINGLE_DH_USE|SSL_OP_NO_TICKET;
+
 #ifdef SSL_OP_NO_COMPRESSION
-	SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
+	op |= SSL_OP_NO_COMPRESSION;
 #endif
+
+	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op) {
+		err = "Server::setup::SSL_CTX_set_options():";
+		err += ERR_error_string(ERR_get_error(), NULL);
+		return -1;
+	}
 
 	// check for DHE and enable it if there are parameters
 	string::size_type dhe = ciphers.find("kDHE");
@@ -130,8 +138,6 @@ int Server::setup()
 		err += ERR_error_string(ERR_get_error(), NULL);
 		return -1;
 	}
-
-
 
 	if (config::v6)
 		sock = new (nothrow) Socket(PF_INET6);

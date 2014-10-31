@@ -55,6 +55,12 @@ extern "C" {
 
 using namespace std;
 
+#ifdef USE_CCIPHERS
+string ciphers = USE_CCIPHERS;
+#else
+string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!ADH:!3DES:AES256:AESGCM:SHA256:SHA384:@STRENGTH";
+#endif
+
 
 class client_session {
 
@@ -108,7 +114,7 @@ const size_t client_session::const_message_size = 1024;
 client_session::client_session() :
 	sock_fd(-1), peer_fd(-1), sock(NULL), err(""),
 	ssl_ctx(NULL), ssl_method(NULL), ssl(NULL),
-	pubkey(NULL), privkey(NULL), my_major(1), my_minor(1)
+	pubkey(NULL), privkey(NULL), my_major(1), my_minor(2)
 {
 
 }
@@ -132,11 +138,11 @@ client_session::~client_session()
 
 int client_session::setup()
 {
-        SSL_library_init();
-        SSL_load_error_strings();
-        OpenSSL_add_all_algorithms();
-        OpenSSL_add_all_digests();
-	ssl_method = TLSv1_client_method();
+	SSL_library_init();
+	SSL_load_error_strings();
+	OpenSSL_add_all_algorithms();
+	OpenSSL_add_all_digests();
+	ssl_method = SSLv23_client_method();
 
 	if (tcgetattr(0, &tattr) < 0) {
 		err = "client_session::setup::tcgetattr:";
@@ -146,7 +152,7 @@ int client_session::setup()
 	old_tattr = tattr;
 
 	if (!ssl_method) {
-		err = "client_session::setup::TLSv1_client_method:";
+		err = "client_session::setup::SSLv23_client_method:";
 		err += ERR_error_string(ERR_get_error(), NULL);
 		return -1;
 	}
@@ -157,9 +163,23 @@ int client_session::setup()
 		return -1;
 	}
 
+	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_SINGLE_DH_USE|SSL_OP_NO_TICKET;
+
 #ifdef SSL_OP_NO_COMPRESSION
-	SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
+	op |= SSL_OP_NO_COMPRESSION;
 #endif
+
+	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op) {
+		err = "client_session::setup::SSL_CTX_set_options():";
+		err += ERR_error_string(ERR_get_error(), NULL);
+		return -1;
+	}
+
+	if (SSL_CTX_set_cipher_list(ssl_ctx, ciphers.c_str()) != 1) {
+		err = "client_sessions::setup::SSL_CTX_set_cipher_list:";
+		err += ERR_error_string(ERR_get_error(), NULL);
+		return -1;
+	}
 
 	if (!(ssl = SSL_new(ssl_ctx))) {
 		err = "client_session::setup::SSL_new:";
@@ -410,8 +430,8 @@ int client_session::authenticate()
 		return -1;
 
 	char sbuf[const_message_size];
-	snprintf(sbuf, sizeof(sbuf), "A:crash-1.001:%32s:%hu:%s:token:%hu:",
-	         config::user.c_str(),
+	snprintf(sbuf, sizeof(sbuf), "A:crash-%hu.%04hu:%32s:%hu:%s:token:%hu:",
+	         my_major, my_minor, config::user.c_str(),
 	         (unsigned short)config::cmd.length(), config::cmd.c_str(),
 	         (unsigned short)resplen);
 	if (resplen > sizeof(sbuf) - strlen(sbuf))
