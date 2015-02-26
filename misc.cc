@@ -182,7 +182,7 @@ void read_good_ips(const string &path)
 		if (!fgets(buf, sizeof(buf), f))
 			break;
 		strtok(buf, ";#\t \n");
-		if (inet_pton(AF_INET6, buf, &in6) == 0 || inet_pton(AF_INET, buf, &in) == 0)
+		if (inet_pton(AF_INET6, buf, &in6) == 1 || inet_pton(AF_INET, buf, &in) == 1)
 			global::good_ips[buf] = 1;
 	} while (!feof(f));
 	fclose(f);
@@ -195,7 +195,8 @@ void read_good_ips(const string &path)
 bool is_good_ip(const struct in_addr &in)
 {
 	char dst[128];
-	inet_ntop(AF_INET, &in, dst, sizeof(dst));
+	if (inet_ntop(AF_INET, &in, dst, sizeof(dst)) == NULL)
+		return 0;
 	if (global::good_ips.find(dst) != global::good_ips.end())
 		return 1;
 
@@ -214,7 +215,8 @@ bool is_good_ip(const struct in_addr &in)
 bool is_good_ip(const struct in6_addr &in6)
 {
 	char dst[128];
-	inet_ntop(AF_INET6, &in6, dst, sizeof(dst));
+	if (inet_ntop(AF_INET6, &in6, dst, sizeof(dst)) == NULL)
+		return 0;
 	if (global::good_ips.find(dst) != global::good_ips.end())
 		return 1;
 	return 0;
