@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Sebastian Krahmer.
+ * Copyright (C) 2014-2015 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,25 +34,21 @@
 #include <openssl/crypto.h>
 #include <openssl/dh.h>
 
-#include "dh512.cc"
-#include "dh1024.cc"
+#include "dh2048.cc"
 
 
-static DH *dh512 = NULL;
-static DH *dh1024 = NULL;
+static DH *dh2048 = NULL;
 
 
 DH *dh_callback(SSL *ssl, int is_exported, int keylen)
 {
-	if (keylen == 512)
-		return dh512;
-	return dh1024;
+	return dh2048;
 }
 
 
 int enable_dh(SSL_CTX *ctx)
 {
-	if ((dh512 = get_dh512()) != NULL && (dh1024 = get_dh1024()) != NULL) {
+	if ((dh2048 = get_dh2048()) != NULL) {
 		SSL_CTX_set_tmp_dh_callback(ctx, dh_callback);
 		return 1;
 	}
