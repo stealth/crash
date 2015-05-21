@@ -102,6 +102,6 @@ crashd.o: crashd.cc
 crashc.o: crashc.cc
 	$(CXX) $(CFLAGS) -c crashc.cc
 
-dh.o: dh.cc dh512.cc dh1024.cc
+dh.o: dh.cc dh2048.cc
 	$(CXX) $(CFLAGS) -c dh.cc
 
