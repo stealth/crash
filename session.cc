@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2015 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,6 +32,7 @@
 
 #include <cstdio>
 #include <string>
+#include <ctype.h>
 #include <errno.h>
 #include <pwd.h>
 #include <grp.h>
@@ -65,7 +66,7 @@ enum {
 
 server_session::server_session(int fd, SSL_CTX *ctx)
 	: sock(fd), ssl(NULL), ssl_ctx(ctx), pubkey(NULL),
-	  user("NULL"), cmd("NULL"), home(""), final_uid(0xffff)
+	  user("NULL"), cmd(""), home(""), shell(""), final_uid(0xffff)
 {
 	struct sockaddr_in sin4;
 	struct sockaddr_in6 sin6;
@@ -101,7 +102,6 @@ server_session::~server_session()
 	if (pubkey)
 		EVP_PKEY_free(pubkey);
 	// Do not mess with SSL_CTX, its not owned by us, but by server {}
-	the_pty.close();
 }
 
 
@@ -111,7 +111,10 @@ int server_session::handle_command(const string &tag, char *buf, unsigned short 
 		struct winsize ws;
 		if (sscanf(buf, "%hu:%hu:%hu:%hu", &ws.ws_row, &ws.ws_col, &ws.ws_xpixel, &ws.ws_ypixel) != 4)
 			return -1;
-		return ioctl(the_pty.master(), TIOCSWINSZ, &ws);
+		if (iob.is_pty()) {
+			if (ioctl(iob.master1(), TIOCSWINSZ, &ws) < 0)
+				return -1;
+		}
 	}
 	return 0;
 }
@@ -119,7 +122,7 @@ int server_session::handle_command(const string &tag, char *buf, unsigned short 
 
 int server_session::handle_data(const string &tag, char *buf, unsigned short blen)
 {
-	return write(the_pty.master(), buf, blen);
+	return writen(iob.master0(), buf, blen);
 }
 
 
@@ -225,7 +228,9 @@ int server_session::authenticate()
 		return -1;
 	}
 	memcpy(cmdbuf, ptr, cmdlen);
-	cmd = cmdbuf;
+	if (cmdlen)
+		cmd = cmdbuf;
+
 	ptr += cmdlen;
 	unsigned short tlen = 0;
 	if (sscanf(ptr, ":token:%hu:", &tlen) != 1)
@@ -267,12 +272,13 @@ int server_session::authenticate()
 	// invalid user, or
 	// someone without a shell, except if always_login switch is given to crashd, or
 	// -U was given and someone else than current user wants to authenticate
-	if (!pwp || (!config::always_login && string(pw.pw_shell) == "/bin/false") ||
+	if (!pwp || (!config::always_login && is_nologin(pwp->pw_shell)) ||
 	    (!config::uid_change && (pwp->pw_uid != geteuid()))) {
 		user = "[crashd]";
 		//XXX emulate verifying in order to avoid
 		// timing attacks
 	} else {
+		shell = pwp->pw_shell;
 		chdir(pwp->pw_dir);
 		home = pwp->pw_dir;
 
@@ -354,6 +360,46 @@ int server_session::authenticate()
 }
 
 
+int server_session::send_const_chunks(const string &tag, const char *buf, size_t blen)
+{
+
+	if (tag != "c0-stdout" && tag != "c0-stderr") {
+		err = "server_session::send_const_chunk: Invalid tag";
+		return -1;
+	}
+
+	char sbuf[const_message_size];
+	size_t chunk_size = const_message_size - 20;	// room for D:tag...
+
+	for (size_t i = 0; i < blen; i += chunk_size) {
+		size_t n = chunk_size;
+		if (blen - i < chunk_size)
+			n = blen - i;
+
+		memset(sbuf, 0, sizeof(sbuf));
+		snprintf(sbuf, sizeof(sbuf), "D:%s:%hu:", tag.c_str(), (unsigned short)n);
+		size_t slen = strlen(sbuf);
+		memcpy(sbuf + slen, buf + i, n);
+		rewrite1: ssize_t r = SSL_write(ssl, sbuf, sizeof(sbuf));
+		switch (SSL_get_error(ssl, r)) {
+		case SSL_ERROR_NONE:
+			break;
+		case SSL_ERROR_ZERO_RETURN:
+			err = "server_session::send_const_chunks: Connection drop.";
+			return 0;
+		case SSL_ERROR_WANT_WRITE:
+		case SSL_ERROR_WANT_READ:
+			goto rewrite1;
+		default:
+			err = "server_session::send_const_chunks::SSL_write:";
+			err += ERR_error_string(ERR_get_error(), NULL);
+			return -1;
+		}
+	}
+	return blen;
+}
+
+
 int server_session::handle()
 {
 	struct itimerval iti;
@@ -415,22 +461,17 @@ int server_session::handle()
 	l += "'";
 	syslog().log(l);
 
-	if (the_pty.open() < 0) {
-		err = "server_session::handle::";
-		err += the_pty.why();
-		return -1;
-	}
 
+	if (cmd.size() > 0)
+		iob.init_pipe();
+	else
+		iob.init_pty(final_uid, -1, 0600);
 
 	pid_t pid;
 	if ((pid = fork()) == 0) {
-#ifndef HAVE_UNIX98
-		the_pty.grant(final_uid, getegid(), 0600);
-#endif
-
 		long mfd = sysconf(_SC_OPEN_MAX);
 		for (long i = 0; i <= mfd; ++i) {
-			if (i != the_pty.slave())
+			if (i != iob.slave0() && i != iob.slave1() && i != iob.slave2())
 				close(i);
 		}
 		setsid();
@@ -452,14 +493,30 @@ int server_session::handle()
 			syslog().log(err);
 			exit(1);
 		}
-#ifndef ANDROID
-		char *const a[] = {strdup("/bin/sh"), strdup("-c"), strdup(cmd.c_str()), NULL};
+
+		char *a[] = {NULL, NULL, NULL, NULL};
+
+		// dont honor pw shell entry in case of always-login
+		if (config::always_login) {
+#ifdef ANDROID
+			a[0] = strdup("/system/bin/sh");
 #else
-		char *const a[] = {strdup("/system/bin/sh"), strdup("-c"), strdup(cmd.c_str()), NULL};
+			a[0] = strdup("/bin/sh");
 #endif
-		dup2(the_pty.slave(), 0);
-		dup2(0, 1); dup2(1, 2);
-		the_pty.close();
+		} else
+			a[0] = strdup(shell.c_str());
+
+		if (cmd.size() > 0) {
+			a[1] = strdup("-c");
+			a[2] = strdup(cmd.c_str());
+		}
+
+		dup2(iob.slave0(), 0);
+		dup2(iob.slave1(), 1);
+		dup2(iob.slave2(), 2);
+
+		iob.close_master();
+		iob.close_slave();
 
 		ioctl(0, TIOCSCTTY, 0);
 
@@ -474,7 +531,8 @@ int server_session::handle()
 		return -1;
 	}
 
-	logger::login(the_pty.sname(), user, peer_ip);
+	if (iob.is_pty())
+		logger::login(iob.pts_name(), user, peer_ip);
 
 	if (config::uid_change && setuid(final_uid) < 0) {
 		err = "server_session::handle::setuid:";
@@ -482,18 +540,26 @@ int server_session::handle()
 		return -1;
 	}
 
-	close(the_pty.slave());
-	char buf[const_message_size/2], sbuf[const_message_size], rbuf[const_message_size + 1], tag[64];
+	iob.close_slave();
+
+	char buf[8192], sbuf[const_message_size], rbuf[const_message_size + 1], tag[64];
 	fd_set rset;
 	ssize_t r = 0;
-	int max = the_pty.master() > sock ? the_pty.master() : sock;
+	int max = iob.master1() > sock ? iob.master1() : sock;
+	max = max > iob.master2() ? max : iob.master2();
 	++max;
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(sock, &rset);
-		FD_SET(the_pty.master(), &rset);
-		memset(buf, 0, sizeof(buf)); memset(rbuf, 0, sizeof(rbuf));
-		memset(sbuf, 0, sizeof(sbuf)); memset(tag, 0, sizeof(tag));
+
+		// in the pty case, master1 and master2 are the same, thats OK
+		FD_SET(iob.master1(), &rset);
+		FD_SET(iob.master2(), &rset);
+		memset(buf, 0, sizeof(buf));
+		memset(sbuf, 0, sizeof(sbuf));
+		memset(rbuf, 0, sizeof(rbuf));
+		memset(tag, 0, sizeof(tag));
+
 		if (select(max, &rset, NULL, NULL, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
@@ -501,31 +567,28 @@ int server_session::handle()
 			err += strerror(errno);
 			return -1;
 		}
-		if (FD_ISSET(the_pty.master(), &rset)) {
-			if ((r = read(the_pty.master(), buf, sizeof(buf))) <= 0) {
+		if (FD_ISSET(iob.master1(), &rset)) {
+			if ((r = read(iob.master1(), buf, sizeof(buf))) <= 0) {
 				if (errno == EINTR)
 					continue;
 				// process died; do a clean SSL_shutdown()
 				break;
 			}
-			sprintf(sbuf, "D:channel0:%hu:", (unsigned short)r);
-			size_t slen = strlen(sbuf);
-			memcpy(sbuf + slen, buf, r);
-			rewrite: ssize_t n = SSL_write(ssl, sbuf, const_message_size);
-			switch (SSL_get_error(ssl, n)) {
-			case SSL_ERROR_NONE:
-				break;
-			case SSL_ERROR_ZERO_RETURN:
-				return 0;
-			case SSL_ERROR_WANT_WRITE:
-			case SSL_ERROR_WANT_READ:
-				goto rewrite;
-			default:
-				err = "server_session::handle::SSL_write:";
-				err += ERR_error_string(ERR_get_error(), NULL);
+			if (send_const_chunks("c0-stdout", buf, r) <= 0)
 				return -1;
+		// in the pty case, this is the same FD_ISSET() as above, as master1 and master2 are equal. thats OK and
+		// this else is never taken
+		} else if (FD_ISSET(iob.master2(), &rset)) {
+			if ((r = read(iob.master2(), buf, sizeof(buf))) <= 0) {
+				if (errno == EINTR)
+					continue;
+				// process died; do a clean SSL_shutdown()
+				break;
 			}
-		} else if (FD_ISSET(sock, &rset)) {
+			if (send_const_chunks("c0-stderr", buf, r) <= 0)
+				return -1;
+		}
+		if (FD_ISSET(sock, &rset)) {
 			repeek: r = SSL_peek(ssl, rbuf, const_message_size);
 			switch (SSL_get_error(ssl, r)) {
 			case SSL_ERROR_NONE:

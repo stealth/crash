@@ -101,26 +101,45 @@ int pty::open()
 }
 
 
+int pty::close_slave()
+{
+	::close(_slave);
+	_slave = -1;
+	return 0;
+}
+
+
+int pty::close_master()
+{
+	::close(_master);
+	_master = -1;
+	return 0;
+}
+
+
 int pty::close()
 {
-	::close(_master); _master = -1;
-	::close(_slave); _slave = -1;
+	if (_master > -1) {
+		::close(_master);
+		_master = -1;
+	}
+	if (_slave > -1) {
+		::close(_slave);
+		_slave = -1;
+	}
 	return 0;
 }
 
 int pty::grant(uid_t u, gid_t g, mode_t mode)
 {
-	if (chown(m.c_str(), u, g) < 0 || chown(s.c_str(), u, g) < 0) {
+	if (fchmod(_master, mode) < 0 || fchmod(_slave, mode) < 0) {
 		serr = strerror(errno);
 		return -1;
 	}
-	mode_t mask = umask(0);
-	if (chmod(m.c_str(), mode) < 0 || chmod(s.c_str(), mode) < 0) {
+	if (fchown(_master, u, g) < 0 || fchown(_slave, u, g) < 0) {
 		serr = strerror(errno);
-		umask(mask);
 		return -1;
 	}
-	umask(mask);
 	return 0;
 }
 

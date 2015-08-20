@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2015 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,7 +36,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <string>
-#include "pty.h"
+#include "iobox.h"
 
 extern "C" {
 #include <openssl/ssl.h>
@@ -52,12 +52,9 @@ class server_session {
 	SSL_CTX *ssl_ctx;
 	EVP_PKEY *pubkey;
 
-	string user, cmd, home;
-#ifdef HAVE_UNIX98
-	pty98 the_pty;
-#else
-	pty the_pty;
-#endif
+	string user, cmd, home, shell;
+
+	iobox iob;
 
 	uid_t final_uid;
 	char peer_ip[64];
@@ -76,6 +73,8 @@ public:
 	~server_session();
 
 	int handle();
+
+	int send_const_chunks(const std::string &, const char *, size_t);
 
 	const char *why() { return err.c_str(); };
 

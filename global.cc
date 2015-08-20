@@ -5,7 +5,7 @@
 
 namespace global {
 
-	bool window_size_changed = 0;
+	volatile bool window_size_changed = 0;
 
 	pid_t crashd_pid = 0;
 

@@ -223,4 +223,13 @@ bool is_good_ip(const struct in6_addr &in6)
 }
 
 
+bool is_nologin(const string &shell)
+{
+	if (shell.find("false") != string::npos)
+		return 1;
+	if (shell.find("nologin") != string::npos)
+		return 1;
+	return 0;
+}
+
 

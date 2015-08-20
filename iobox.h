@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2015 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,31 +30,97 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __misc_h__
-#define __misc_h__
+#ifndef __iobox_h__
+#define __iobox_h__
 
 #include <string>
-#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include "pty.h"
 
-int writen(int fd, const void *buf, size_t len);
 
-int readn(int fd, void *buf, size_t len);
+typedef enum {
+	MODE_INVALID	= 0,
+	MODE_PTY	= 1,
+	MODE_PIPE	= 2
+} iobox_mode_t;
 
-void sig_winch(int);
 
-int read_keys_from_file(const std::string &);
+/* an I/O layer abstraction class that could be a pty or a pipe,
+ * depending on whether an pty needs to be allocated or not. This makes the
+ * session loop much more readable.
+ * In the pty case, slave0, slave1, slave2 are all the same as only one pty
+ * is needed for IPC. In pipe case, theres a pipe pair for each slave0/master0,
+ * slave1/master1, slave2/master2 so that the session loop can distinguish between
+ * stdout and stderr writes of the child and can mux this through the crash client.
+ * This is good for some programs which require stdout/stderr split to distinguish
+ * output data from errors (such as opmsg).
+ */
 
-void read_until(const char *, const char *);
+class iobox {
 
-std::string extract_keys(const char *);
+	int in[2], out[2], err[2];
 
-void read_good_ips(const std::string &);
-
-bool is_good_ip(const struct in_addr &);
-
-bool is_good_ip(const struct in6_addr &);
-
-bool is_nologin(const std::string &);
-
+#ifdef HAVE_UNIX98
+	pty98 _pty;
+#else
+	pty _pty;
 #endif
 
+	iobox_mode_t mode;
+
+	std::string serr;
+
+public:
+
+	const char *why() { return serr.c_str(); }
+
+	iobox();
+
+	~iobox();
+
+	bool is_pty() { return mode == MODE_PTY; }
+
+	int init_pipe();
+
+	int init_pty(uid_t, gid_t, mode_t);
+
+	int slave0();
+
+	int close_slave0();
+
+	int slave1();
+
+	int close_slave1();
+
+	int slave2();
+
+	int close_slave2();
+
+	int master0();
+
+	int close_master0();
+
+	int master1();
+
+	int close_master1();
+
+	int master2();
+
+	int close_master2();
+
+	int close_master();
+
+	int close_slave();
+
+	const std::string pts_name()
+	{
+		if (mode == MODE_PTY)
+			return _pty.sname();
+		return "";
+	}
+
+};
+
+
+#endif

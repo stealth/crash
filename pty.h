@@ -67,6 +67,10 @@ public:
 	// close both
 	int close();
 
+	int close_master();
+
+	int close_slave();
+
 	int master() { return _master; }
 
 	int slave() { return _slave; }
@@ -75,8 +79,8 @@ public:
 
 	string sname() { return s; }
 
-	// do chown
-	int grant(uid_t, gid_t, mode_t);
+	// do chown, chmod
+	virtual int grant(uid_t, gid_t, mode_t);
 
 	const char* why();
 };
@@ -93,6 +97,8 @@ public:
 	pty98 &operator=(const pty98 &);
 
 	virtual int open();
+
+	virtual int grant(uid_t, gid_t, mode_t);
 };
 
 

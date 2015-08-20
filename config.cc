@@ -26,7 +26,7 @@ namespace config
 	std::string user_keys = ".crash";
 
 	std::string user = "";
-	std::string cmd = "/bin/bash -i";
+	std::string cmd = "";
 
 	// trigger-file / trigger-message
 	std::string tfile = "/var/log/messages", tmsg = "";

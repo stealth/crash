@@ -1,21 +1,22 @@
 #
 # setup your build environment to build for Android:
 # 1. Install NDK and Android git (at least the openssl fork)
-# 2. symlink $NDK/platforms/android-9/arch-arm/usr/include/openssl to /path/to/android.git/external/openssl/include/openssl/
-# 3. copy emulators libssl.so and libcrypto.so to $NDK/platforms/android-9/arch-arm/usr/lib/
+# 2. symlink $NDK/platforms/android-19/arch-arm/usr/include/openssl to /path/to/android.git/external/openssl/include/openssl/
+# 3. copy emulators libssl.so and libcrypto.so to $NDK/platforms/android-19/arch-arm/usr/lib/
 
 
 ROOT=/opt
-NDK=android-ndk-r8b
+NDK=android-ndk-r9d
 
-PREFIX=$(ROOT)/$(NDK)/toolchains/arm-linux-androideabi-4.4.3/prebuilt/linux-x86/bin/arm-linux-androideabi-
-SYSROOT=--sysroot=$(ROOT)/$(NDK)/platforms/android-9/arch-arm/
+PREFIX=$(ROOT)/$(NDK)/toolchains/arm-linux-androideabi-4.8/prebuilt/linux-x86_64/bin/arm-linux-androideabi-
+SYSROOT=--sysroot=$(ROOT)/$(NDK)/platforms/android-19/arch-arm/
 INC=-I$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/include\
-    -I$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/libs/armeabi/include
-LIB=-Wl,$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/libs/armeabi/libgnustl_static.a
+    -I$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/libs/armeabi/include\
+    -I$(ROOT)/$(NDK)/sources/cxx-stl/stlport/stlport
+LIB=-Wl,$(ROOT)/$(NDK)/sources/cxx-stl/stlport/libs/armeabi/libstlport_static.a
 
 CXX=$(PREFIX)c++ $(INC) $(SYSROOT)
-CFLAGS=-Wall -O2 -DHAVE_UNIX98 -pedantic -DANDROID
+CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic -DANDROID
 LD=$(PREFIX)c++ $(SYSROOT)
 STRIP=strip
 
@@ -28,9 +29,12 @@ crashc: net.o misc.o crashc.o config.o global.o
 	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o $(LIB) -lssl -ldl -lcrypto -o crashc
 	$(STRIP) crashc
 
-crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o
-	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o $(LIB) -lssl -ldl -lcrypto -o crashd
+crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o
+	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o $(LIB) -lssl -ldl -lcrypto -o crashd
 	$(STRIP) crashd
+
+iobox.o: iobox.cc
+	$(CXX) $(CFLAGS) -c iobox.cc
 
 server.o: server.cc
 	$(CXX) $(CFLAGS) -c server.cc
@@ -65,6 +69,6 @@ crashd.o: crashd.cc
 crashc.o: crashc.cc
 	$(CXX) $(CFLAGS) -c crashc.cc
 
-dh.o: dh.cc dh512.cc dh1024.cc
+dh.o: dh.cc dh2048.cc
 	$(CXX) $(CFLAGS) -c dh.cc
 

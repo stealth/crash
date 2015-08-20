@@ -253,8 +253,14 @@ int client_session::setup()
 
 int client_session::handle_data(const string &tag, char *buf, unsigned short blen)
 {
-	return write(1, buf, blen);
+	if (tag == "channel0" || tag == "c0-stdout")
+		return writen(1, buf, blen);
+	else if (tag == "c0-stderr")
+		return writen(2, buf, blen);
+
+	return 0;
 }
+
 
 int client_session::handle_command(const string &tag, char *buf, unsigned short blen)
 {
@@ -561,7 +567,8 @@ int client_session::handle()
 					err += ERR_error_string(ERR_get_error(), NULL);
 					return -1;
 			}
-		} else if (FD_ISSET(peer_fd, &rset)) {
+		}
+		if (FD_ISSET(peer_fd, &rset)) {
 			repeek: r = SSL_peek(ssl, rbuf, const_message_size);
 			switch (SSL_get_error(ssl, r)) {
 			case SSL_ERROR_NONE:

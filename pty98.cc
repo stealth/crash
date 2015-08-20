@@ -59,7 +59,7 @@ pty98 &pty98::operator=(const pty98 &rhs)
 
 int pty98::open()
 {
-#ifdef HAVE_UNIX98 
+#ifdef HAVE_UNIX98
 	m = "/dev/ptmx";
 
 	if ((_master = ::open(m.c_str(), O_RDWR|O_NOCTTY)) < 0) {
@@ -94,6 +94,20 @@ int pty98::open()
 #endif
 
 #endif
+	return 0;
+}
+
+
+int pty98::grant(uid_t u, gid_t g, mode_t mode)
+{
+	if (fchmod(_slave, mode) < 0) {
+		serr = strerror(errno);
+		return -1;
+	}
+	if (fchown(_slave, u, g) < 0) {
+		serr = strerror(errno);
+		return -1;
+	}
 	return 0;
 }
 
