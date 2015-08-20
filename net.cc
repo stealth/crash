@@ -96,7 +96,7 @@ int Socket::blisten(unsigned short port, bool do_listen)
 		return -1;
 	}
 
-	if (bind(sock_fd, sin, slen) < 0) {
+	if (::bind(sock_fd, sin, slen) < 0) {
 		error = "Socket::bind:";
 		error += strerror(errno);
 		return -1;

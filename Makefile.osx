@@ -1,9 +1,9 @@
 CXX=c++
-CFLAGS=-w -O2 -DHAVE_UNIX98 -pedantic -ansi -std=c++11
-INC=
+INC=-I/usr/local/ssl/include
+CFLAGS=$(INC) -O2 -DHAVE_UNIX98 -pedantic -ansi -std=c++11
 LD=c++
 STRIP=strip
-LIBS=-lssl -lcrypto
+LIBS=-L/usr/local/ssl/lib -lssl -lcrypto
 
 all: crashd crashc
 
