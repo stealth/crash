@@ -114,7 +114,7 @@ const size_t client_session::const_message_size = 1024;
 client_session::client_session() :
 	sock_fd(-1), peer_fd(-1), sock(NULL), err(""),
 	ssl_ctx(NULL), ssl_method(NULL), ssl(NULL),
-	pubkey(NULL), privkey(NULL), my_major(1), my_minor(2)
+	pubkey(NULL), privkey(NULL), my_major(1), my_minor(3)
 {
 
 }

@@ -59,7 +59,7 @@ extern "C" {
 using namespace std;
 
 // change in client my_major, my_minor accordingly
-string server_session::banner = "1000 crashd-1.002 OK\r\n";
+string server_session::banner = "1000 crashd-1.003 OK\r\n";
 enum {
 	const_message_size = 1024
 };
