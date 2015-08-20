@@ -156,7 +156,7 @@ int server_session::authenticate()
 	char sbuf[const_message_size];
 
 	memset(sbuf, 0, sizeof(sbuf));
-	sprintf(sbuf, "A:sign:%hu:", EVP_MD_size(sha512));
+	sprintf(sbuf, "A:sign:%hu:", (unsigned short)EVP_MD_size(sha512));
 	memcpy(sbuf + strlen(sbuf), md, EVP_MD_size(sha512));
 
 	err = "server_session::authenticate:: auth exchange";
