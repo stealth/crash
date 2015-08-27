@@ -81,6 +81,8 @@ class client_session {
 
 	uint16_t my_major, my_minor;
 
+	bool has_tty;
+
 protected:
 
 	int handle_command(const string &, char *, unsigned short);
@@ -114,7 +116,7 @@ const size_t client_session::const_message_size = 1024;
 client_session::client_session() :
 	sock_fd(-1), peer_fd(-1), sock(NULL), err(""),
 	ssl_ctx(NULL), ssl_method(NULL), ssl(NULL),
-	pubkey(NULL), privkey(NULL), my_major(1), my_minor(3)
+	pubkey(NULL), privkey(NULL), my_major(1), my_minor(3), has_tty(0)
 {
 
 }
@@ -132,7 +134,8 @@ client_session::~client_session()
 	*/
 	delete sock;
 	close(peer_fd);
-	tcsetattr(0, TCSANOW, &old_tattr);
+	if (has_tty)
+		tcsetattr(0, TCSANOW, &old_tattr);
 }
 
 
@@ -144,12 +147,10 @@ int client_session::setup()
 	OpenSSL_add_all_digests();
 	ssl_method = SSLv23_client_method();
 
-	if (tcgetattr(0, &tattr) < 0) {
-		err = "client_session::setup::tcgetattr:";
-		err += strerror(errno);
-		return -1;
+	if (tcgetattr(0, &tattr) >= 0) {
+		old_tattr = tattr;
+		has_tty = 1;
 	}
-	old_tattr = tattr;
 
 	if (!ssl_method) {
 		err = "client_session::setup::SSLv23_client_method:";
@@ -270,6 +271,9 @@ int client_session::handle_command(const string &tag, char *buf, unsigned short 
 
 int client_session::send_window_size()
 {
+	if (!has_tty)
+		return 0;
+
 	char wsbuf[64], sbuf[const_message_size];
 
 	global::window_size_changed = 0;
@@ -516,11 +520,9 @@ int client_session::handle()
 
 	// Now, where passphrase has been typed etc;
 	// setup terminal into raw mode
-	if (tcsetattr(0, TCSANOW, &tattr) < 0) {
-		err = "client_session::handle::tcsetattr:";
-		err += strerror(errno);
-		return -1;
-	}
+	if (has_tty)
+		tcsetattr(0, TCSANOW, &tattr);
+
 	char buf[const_message_size/2], sbuf[const_message_size],
 	     rbuf[const_message_size + 1], tag[64];
 	fd_set rset;
