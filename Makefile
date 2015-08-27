@@ -34,7 +34,6 @@ clean:
 
 keys:
 	umask 066
-	reset
 	@echo "***** Generating Keys ****"
 	@echo
 	@echo "Whatever you enter for Country/Organization etc is not important (press enter)."
