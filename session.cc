@@ -576,9 +576,8 @@ int server_session::handle()
 			}
 			if (send_const_chunks("c0-stdout", buf, r) <= 0)
 				return -1;
-		// in the pty case, this is the same FD_ISSET() as above, as master1 and master2 are equal. thats OK and
-		// this else is never taken
-		} else if (FD_ISSET(iob.master2(), &rset)) {
+		}
+		if (!iob.is_pty() && FD_ISSET(iob.master2(), &rset)) {
 			if ((r = read(iob.master2(), buf, sizeof(buf))) <= 0) {
 				if (errno == EINTR)
 					continue;
@@ -634,10 +633,13 @@ int server_session::handle()
 			}
 			memcpy(sbuf, ptr, len);
 
-			if (c == 'D')
-				handle_data(tag, sbuf, len);
-			else if (c == 'C')
-				handle_command(tag, sbuf, len);
+			if (c == 'D') {
+				if (handle_data(tag, sbuf, len) < 0)
+					break;
+			} else if (c == 'C') {
+				if (handle_command(tag, sbuf, len) < 0)
+					break;
+			}
 		}
 	}
 
