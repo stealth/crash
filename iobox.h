@@ -42,7 +42,8 @@
 typedef enum {
 	MODE_INVALID	= 0,
 	MODE_PTY	= 1,
-	MODE_PIPE	= 2
+	MODE_PIPE	= 2,
+	MODE_SOCKET	= 3
 } iobox_mode_t;
 
 
@@ -84,6 +85,8 @@ public:
 	int init_pipe();
 
 	int init_pty(uid_t, gid_t, mode_t);
+
+	int init_socket();
 
 	int slave0();
 

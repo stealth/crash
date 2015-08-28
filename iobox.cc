@@ -33,6 +33,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <cstring>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include "pty.h"
 #include "iobox.h"
 
@@ -53,7 +55,7 @@ iobox::~iobox()
 {
 	if (mode == MODE_PTY)
 		_pty.close();
-	else if (mode == MODE_PIPE) {
+	else if (mode == MODE_PIPE || mode == MODE_SOCKET) {
 		close(in[0]); close(in[1]);
 		close(out[0]); close(out[1]);
 		close(err[0]); close(err[1]);
@@ -95,6 +97,29 @@ int iobox::init_pipe()
 	}
 	if (pipe(err) < 0) {
 		serr = "iobox::init_pipe:";
+		serr += strerror(errno);
+		return -1;
+	}
+	return 0;
+}
+
+
+int iobox::init_socket()
+{
+	mode = MODE_SOCKET;
+
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, in) < 0) {
+		serr = "iobox::init_socket:";
+		serr += strerror(errno);
+		return -1;
+	}
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, out) < 0) {
+		serr = "iobox::init_socket:";
+		serr += strerror(errno);
+		return -1;
+	}
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, err) < 0) {
+		serr = "iobox::init_socket:";
 		serr += strerror(errno);
 		return -1;
 	}
