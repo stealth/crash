@@ -542,6 +542,7 @@ int server_session::handle()
 
 	iob.close_slave();
 
+	bool leave = 0;
 	char buf[8192], sbuf[const_message_size], rbuf[const_message_size + 1], tag[64];
 	fd_set rset;
 	ssize_t r = 0;
@@ -572,9 +573,9 @@ int server_session::handle()
 				if (errno == EINTR)
 					continue;
 				// process died; do a clean SSL_shutdown()
-				break;
+				leave = 1;
 			}
-			if (send_const_chunks("c0-stdout", buf, r) <= 0)
+			if (r > 0 && send_const_chunks("c0-stdout", buf, r) <= 0)
 				return -1;
 		}
 		if (!iob.is_pty() && FD_ISSET(iob.master2(), &rset)) {
@@ -582,11 +583,14 @@ int server_session::handle()
 				if (errno == EINTR)
 					continue;
 				// process died; do a clean SSL_shutdown()
-				break;
+				leave = 1;
 			}
-			if (send_const_chunks("c0-stderr", buf, r) <= 0)
+			if (r > 0 && send_const_chunks("c0-stderr", buf, r) <= 0)
 				return -1;
 		}
+		if (leave)
+			break;
+
 		if (FD_ISSET(sock, &rset)) {
 			repeek: r = SSL_peek(ssl, rbuf, const_message_size);
 			switch (SSL_get_error(ssl, r)) {

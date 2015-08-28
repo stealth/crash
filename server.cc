@@ -234,6 +234,7 @@ int Server::loop()
 					syslog().log(l);
 				}
 				syslog().log("closing connection");
+				sleep(1);
 				delete s;
 				exit(0);
 			}
@@ -251,6 +252,7 @@ int Server::loop()
 		server_session *s = new (nothrow) server_session(sock_fd, ssl_ctx);
 		if (s)
 			s->handle();
+		sleep(1);
 		delete s;
 	}
 	return 0;
