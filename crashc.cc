@@ -527,12 +527,15 @@ int client_session::handle()
 	     rbuf[const_message_size + 1], tag[64];
 	fd_set rset;
 	ssize_t r = 0;
+	bool has_stdin = 1;
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(peer_fd, &rset);
-		FD_SET(0, &rset);
+		if (has_stdin)
+			FD_SET(0, &rset);
 		memset(buf, 0, sizeof(buf)); memset(sbuf, 0, sizeof(sbuf));
 		memset(rbuf, 0, sizeof(rbuf)); memset(tag, 0, sizeof(tag));
+		errno = 0;
 		if (select(peer_fd + 1, &rset, NULL, NULL, NULL) < 0) {
 			if (errno == EINTR) {
 				if (global::window_size_changed)
@@ -543,13 +546,16 @@ int client_session::handle()
 			err += strerror(errno);
 			return -1;
 		}
-		if (FD_ISSET(0, &rset)) {
+		if (has_stdin && FD_ISSET(0, &rset)) {
 			if ((r = read(0, buf, sizeof(buf))) <= 0) {
 				if (errno == EINTR)
 					continue;
-				err = "client_session::handle::";
-				err += strerror(errno);
-				break;
+				has_stdin = 0;
+				if (r < 0 || has_tty)
+					continue;
+
+				r = 1;
+				buf[0] = 0x3;	// emulate Ctrl-C for pipes
 			}
 
 			sprintf(sbuf, "D:channel0:%hu:", (unsigned short)r);
@@ -644,6 +650,12 @@ void help(const char *p)
 }
 
 
+void sig_int(int x)
+{
+	return;
+}
+
+
 int main(int argc, char **argv)
 {
 
@@ -688,6 +700,10 @@ int main(int argc, char **argv)
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = sig_winch;
 	sigaction(SIGWINCH, &sa, NULL);
+	sa.sa_handler = sig_int;
+	sigaction(SIGINT, &sa, NULL);
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &sa, NULL);
 
 	if (config::user.length() == 0) {
 		help(*argv);
