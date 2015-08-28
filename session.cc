@@ -463,7 +463,7 @@ int server_session::handle()
 
 
 	if (cmd.size() > 0)
-		iob.init_pipe();
+		iob.init_socket();
 	else
 		iob.init_pty(final_uid, -1, 0600);
 

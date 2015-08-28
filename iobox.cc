@@ -108,17 +108,17 @@ int iobox::init_socket()
 {
 	mode = MODE_SOCKET;
 
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, in) < 0) {
+	if (socketpair(PF_UNIX, SOCK_SEQPACKET, 0, in) < 0) {
 		serr = "iobox::init_socket:";
 		serr += strerror(errno);
 		return -1;
 	}
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, out) < 0) {
+	if (socketpair(PF_UNIX, SOCK_SEQPACKET, 0, out) < 0) {
 		serr = "iobox::init_socket:";
 		serr += strerror(errno);
 		return -1;
 	}
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, err) < 0) {
+	if (socketpair(PF_UNIX, SOCK_SEQPACKET, 0, err) < 0) {
 		serr = "iobox::init_socket:";
 		serr += strerror(errno);
 		return -1;
