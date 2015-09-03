@@ -584,6 +584,7 @@ int server_session::handle()
 		memset(rbuf, 0, sizeof(rbuf));
 		memset(tag, 0, sizeof(tag));
 
+		errno = 0;
 		if (select(max, &rset, NULL, NULL, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
