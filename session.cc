@@ -37,8 +37,10 @@
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
+#include <signal.h>
 #include <termios.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -63,6 +65,22 @@ string server_session::banner = "1000 crashd-1.003 OK\r\n";
 enum {
 	const_message_size = 1024
 };
+
+
+// in non-pty case, get notified about childs exit to close
+// DGRAM sockets which dont return "ready for read" on select()
+volatile pid_t pipe_child = 1;
+volatile bool pipe_child_exited = 0;
+
+static void sess_sig_chld(int x)
+{
+	pid_t pid;
+	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+		if (pid == pipe_child)
+			pipe_child_exited = 1;
+	}
+}
+
 
 server_session::server_session(int fd, SSL_CTX *ctx)
 	: sock(fd), ssl(NULL), ssl_ctx(ctx), pubkey(NULL),
@@ -462,13 +480,18 @@ int server_session::handle()
 	syslog().log(l);
 
 
-	if (cmd.size() > 0)
+	if (cmd.size() > 0) {
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = sess_sig_chld;
+		sa.sa_flags = SA_RESTART;
+		sigaction(SIGCHLD, &sa, NULL);
 		iob.init_socket();
-	else
+	} else
 		iob.init_pty(final_uid, -1, 0600);
 
-	pid_t pid;
-	if ((pid = fork()) == 0) {
+	// only on a pipe in non-pty mode, unused for other cases
+	if ((pipe_child = fork()) == 0) {
 		long mfd = sysconf(_SC_OPEN_MAX);
 		for (long i = 0; i <= mfd; ++i) {
 			if (i != iob.slave0() && i != iob.slave1() && i != iob.slave2())
@@ -525,7 +548,7 @@ int server_session::handle()
 		char *const env[] = {strdup(h.c_str()), NULL};
 		execve(*a, a, env);
 		exit(0);
-	} else if (pid < 0) {
+	} else if (pipe_child < 0) {
 		err = "server_session::handle::";
 		err += strerror(errno);
 		return -1;
@@ -549,7 +572,7 @@ int server_session::handle()
 	int max = iob.master1() > sock ? iob.master1() : sock;
 	max = max > iob.master2() ? max : iob.master2();
 	++max;
-	for (;;) {
+	for (;!pipe_child_exited;) {
 		FD_ZERO(&rset);
 		FD_SET(sock, &rset);
 

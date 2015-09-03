@@ -12,7 +12,7 @@ STRIP=$(CROSS_COMPILE)strip
 else
 
 CXX=c++
-CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic -ansi
+CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic
 INC=
 LD=c++
 STRIP=strip

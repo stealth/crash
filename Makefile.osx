@@ -1,6 +1,6 @@
 CXX=c++
 INC=-I/usr/local/ssl/include
-CFLAGS=$(INC) -O2 -DHAVE_UNIX98 -pedantic -ansi -std=c++11
+CFLAGS=$(INC) -O2 -DHAVE_UNIX98 -pedantic -std=c++11
 LD=c++
 STRIP=strip
 LIBS=-L/usr/local/ssl/lib -lssl -lcrypto

@@ -1,5 +1,5 @@
 CXX=c++
-CFLAGS=-Wall -O2 -ansi
+CFLAGS=-Wall -O2 -std=c++11 -pedantic
 INC=
 LD=c++
 STRIP=strip
