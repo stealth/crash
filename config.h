@@ -1,5 +1,5 @@
-#ifndef __config_h__
-#define __config_h__
+#ifndef crash_config_h
+#define crash_config_h
 
 #include <string>
 

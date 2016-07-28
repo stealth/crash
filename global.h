@@ -1,5 +1,5 @@
-#ifndef __global_h__
-#define __global_h__
+#ifndef crash_global_h
+#define crash_global_h
 
 #include <sys/types.h>
 #include <string>

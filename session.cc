@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2015 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,9 @@
 
 #include <cstdio>
 #include <string>
+#include <cstring>
 #include <ctype.h>
+#include <memory>
 #include <errno.h>
 #include <pwd.h>
 #include <grp.h>
@@ -56,12 +58,14 @@ extern "C" {
 #include "misc.h"
 #include "pty.h"
 #include "log.h"
+#include "deleters.h"
+#include "missing.h"
 
 
 using namespace std;
 
 // change in client my_major, my_minor accordingly
-string server_session::banner = "1000 crashd-1.003 OK\r\n";
+string server_session::banner = "1000 crashd-1.004 OK\r\n";
 enum {
 	const_message_size = 1024
 };
@@ -159,16 +163,15 @@ int server_session::authenticate()
 		return -1;
 	if (RAND_bytes(rand, sizeof(rand)) != 1)
 		return -1;
-	EVP_MD_CTX md_ctx;
+	unique_ptr<EVP_MD_CTX, EVP_MD_CTX_del> md_ctx(EVP_MD_CTX_create(), EVP_MD_CTX_delete);
 	const EVP_MD *sha512 = EVP_sha512();
-	if (!sha512)
+	if (!sha512 || !md_ctx.get())
 		return -1;
-	EVP_MD_CTX_init(&md_ctx);
-	if (EVP_DigestInit_ex(&md_ctx, sha512, NULL) != 1)
+	if (EVP_DigestInit_ex(md_ctx.get(), sha512, NULL) != 1)
 		return -1;
-	if (EVP_DigestUpdate(&md_ctx, rand, sizeof(rand)) != 1)
+	if (EVP_DigestUpdate(md_ctx.get(), rand, sizeof(rand)) != 1)
 		return -1;
-	if (EVP_DigestFinal_ex(&md_ctx, md, NULL) != 1)
+	if (EVP_DigestFinal_ex(md_ctx.get(), md, NULL) != 1)
 		return -1;
 
 	char sbuf[const_message_size];
@@ -352,9 +355,9 @@ int server_session::authenticate()
 		if (config::uid_change)
 			setreuid(0, 0);
 
-		if (EVP_VerifyInit_ex(&md_ctx, sha512, NULL) != 1)
+		if (EVP_VerifyInit_ex(md_ctx.get(), sha512, NULL) != 1)
 			return -1;
-		if (EVP_VerifyUpdate(&md_ctx, md, EVP_MD_size(sha512)) != 1) // 'challenge' that was sent to client
+		if (EVP_VerifyUpdate(md_ctx.get(), md, EVP_MD_size(sha512)) != 1) // 'challenge' that was sent to client
 			return -1;
 		int pubkeylen = i2d_PublicKey(pubkey, NULL);
 		if (pubkeylen <= 0 || pubkeylen >= 32000)
@@ -366,12 +369,12 @@ int server_session::authenticate()
 		if (i2d_PublicKey(pubkey, &b2) != pubkeylen)
 			return -1;
 		// DER encoding of server pubkey
-		if (EVP_VerifyUpdate(&md_ctx, b1, pubkeylen) != 1) {
+		if (EVP_VerifyUpdate(md_ctx.get(), b1, pubkeylen) != 1) {
 			free(b1);
 			return -1;
 		}
 		free(b1);
-		int v = EVP_VerifyFinal(&md_ctx, (unsigned char*)token, tlen, pkey);
+		int v = EVP_VerifyFinal(md_ctx.get(), (unsigned char*)token, tlen, pkey);
 		return v;
 	}
 	return 0;

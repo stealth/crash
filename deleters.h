@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2016 Sebastian Krahmer.
+ * Copyright (C) 2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,76 +30,46 @@
  * SUCH DAMAGE.
  */
 
-#ifndef crash_pty_h
-#define crash_pty_h
 
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string>
+#ifndef crash_deleters_h
+#define crash_deleters_h
 
-using namespace std;
+extern "C" {
+#include <openssl/evp.h>
+#include <openssl/dh.h>
+#include <openssl/ec.h>
+#include <openssl/bn.h>
+}
 
-// A BSD 4.3+ PTY API.
-class pty {
-protected:
-	// file-descriptors for terminal
-	int _master, _slave;
+#include <cstdio>
 
-	// names of device-files
-	string m, s, serr;
-public:
-	pty() : _master(-1), _slave(-1), m(""), s(""), serr("") {}
+extern "C" typedef void (*EVP_PKEY_del)(EVP_PKEY *);
 
+extern "C" typedef void (*EVP_PKEY_CTX_del)(EVP_PKEY_CTX *);
 
-	virtual ~pty() { close(); }
+extern "C" typedef void (*EVP_MD_CTX_del)(EVP_MD_CTX *);
 
-	// Copy-constructor
-	pty(const pty &rhs);
+extern "C" typedef void (*EVP_CIPHER_CTX_del)(EVP_CIPHER_CTX *);
 
-	// Assign-operator
-	pty &operator=(const pty &rhs);
+extern "C" typedef void (*DH_del)(DH *);
 
-	// open master+slave terminal
-	virtual int open();
+extern "C" typedef void (*RSA_del)(RSA *);
 
-	// close both
-	int close();
+extern "C" typedef int (*BIO_del)(BIO *);
 
-	int close_master();
+extern "C" typedef void (*BIGNUM_del)(BIGNUM *);
 
-	int close_slave();
+extern "C" typedef void (*BN_CTX_del)(BN_CTX *);
 
-	int master() { return _master; }
+extern "C" typedef void (*BN_GENCB_del)(BN_GENCB *);
 
-	int slave() { return _slave; }
+extern "C" typedef void (*EC_GROUP_del)(EC_GROUP *);
 
-	string mname() { return m; }
+extern "C" typedef void (*EC_KEY_del)(EC_KEY *);
 
-	string sname() { return s; }
+extern "C" typedef int (*FILE_del)(FILE *);
 
-	// do chown, chmod
-	virtual int grant(uid_t, gid_t, mode_t);
-
-	const char* why();
-};
-
-class pty98 : public pty {
-public:
-	pty98() : pty() {}
-
-	virtual ~pty98() {}
-
-
-	pty98(const pty98 &);
-
-	pty98 &operator=(const pty98 &);
-
-	virtual int open();
-
-	virtual int grant(uid_t, gid_t, mode_t);
-};
+extern "C" typedef void (*free_del)(void *);
 
 
 #endif

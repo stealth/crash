@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __misc_h__
-#define __misc_h__
+#ifndef crash_misc_h
+#define crash_misc_h
 
 #include <string>
 #include <netinet/in.h>

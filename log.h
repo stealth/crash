@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __log_h__
-#define __log_h__
+#ifndef crash_log_h
+#define crash_log_h
 
 #include <string>
 #include <sys/types.h>

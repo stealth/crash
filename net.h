@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Sebastian Krahmer.
+ * Copyright (C) 2006-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,8 +29,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef __net_h__
-#define __net_h__
+#ifndef crash_net_h
+#define crash_net_h
 
 #include <string>
 

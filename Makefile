@@ -12,17 +12,18 @@ STRIP=$(CROSS_COMPILE)strip
 else
 
 CXX=c++
-CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic
-INC=
+#INC=-I/usr/local/ssl/include
+CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic $(INC)
+#LIBS=-Wl,--rpath=/usr/local/ssl/lib -L/usr/local/ssl/lib
 LD=c++
 STRIP=strip
 
 ifeq ($(shell uname -o), GNU/Linux)
-	LIBS=-lssl -lcrypto -lutil
+	LIBS+=-lssl -lcrypto -lutil
 else ifeq ($(shell uname -o), Solaris)
-	LIBS=-lssl -lcrypto -lsocket -lnsl
+	LIBS+=-lssl -lcrypto -lsocket -lnsl
 else
-	LIBS=-lssl -lcrypto
+	LIBS+=-lssl -lcrypto
 endif
 
 endif

@@ -114,13 +114,14 @@ int Server::setup()
 		return -1;
 	}
 
-	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_SINGLE_DH_USE|SSL_OP_NO_TICKET;
+	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
+	op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
 
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
 #endif
 
-	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op) {
+	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op) {
 		err = "Server::setup::SSL_CTX_set_options():";
 		err += ERR_error_string(ERR_get_error(), NULL);
 		return -1;

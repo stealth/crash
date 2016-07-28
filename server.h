@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,8 +29,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef __server_h__
-#define __server_h__
+#ifndef crash_server_h
+#define crash_server_h
 
 #include <sys/types.h>
 #include <time.h>

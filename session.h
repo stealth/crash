@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2015 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __session_h__
-#define __session_h__
+#ifndef crash_session_h
+#define crash_session_h
 
 #include <sys/types.h>
 #include <unistd.h>

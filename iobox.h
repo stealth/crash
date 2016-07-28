@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __iobox_h__
-#define __iobox_h__
+#ifndef crash_iobox_h
+#define crash_iobox_h
 
 #include <string>
 #include <sys/types.h>

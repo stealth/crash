@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Sebastian Krahmer.
+ * Copyright (C) 2009-2016 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,7 +31,10 @@
  */
 
 #include <cstdio>
+#include <cstring>
 #include <iostream>
+#include <memory>
+#include <errno.h>
 #include <string>
 #include <stdlib.h>
 #include <unistd.h>
@@ -52,6 +55,9 @@ extern "C" {
 #include "config.h"
 #include "misc.h"
 #include "global.h"
+#include "deleters.h"
+#include "missing.h"
+
 
 using namespace std;
 
@@ -116,7 +122,7 @@ const size_t client_session::const_message_size = 1024;
 client_session::client_session() :
 	sock_fd(-1), peer_fd(-1), sock(NULL), err(""),
 	ssl_ctx(NULL), ssl_method(NULL), ssl(NULL),
-	pubkey(NULL), privkey(NULL), my_major(1), my_minor(3), has_tty(0)
+	pubkey(NULL), privkey(NULL), my_major(1), my_minor(4), has_tty(0)
 {
 
 }
@@ -164,13 +170,15 @@ int client_session::setup()
 		return -1;
 	}
 
-	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_SINGLE_DH_USE|SSL_OP_NO_TICKET;
+	// keep TLS1.1 for a while for old crash servers
+	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1;
+	op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
 
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
 #endif
 
-	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op) {
+	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op) {
 		err = "client_session::setup::SSL_CTX_set_options():";
 		err += ERR_error_string(ERR_get_error(), NULL);
 		return -1;
@@ -407,14 +415,16 @@ int client_session::authenticate()
 		return -1;
 
 	unsigned char resp[const_message_size];
-	EVP_MD_CTX md_ctx;
+	unique_ptr<EVP_MD_CTX, EVP_MD_CTX_del> md_ctx(EVP_MD_CTX_create(), EVP_MD_CTX_delete);
 	const EVP_MD *sha512 = EVP_sha512();
 
-	EVP_MD_CTX_init(&md_ctx);
-	if (EVP_SignInit_ex(&md_ctx, sha512, NULL) != 1)
+	if (!sha512 || !md_ctx.get())
+		return -1;
+
+	if (EVP_SignInit_ex(md_ctx.get(), sha512, NULL) != 1)
 		return -1;
 	// 'challenge' that was sent by server
-	if (EVP_SignUpdate(&md_ctx, challenge, clen) != 1)
+	if (EVP_SignUpdate(md_ctx.get(), challenge, clen) != 1)
 		return -1;
 
 	int pubkeylen = i2d_PublicKey(pubkey, NULL);
@@ -429,14 +439,14 @@ int client_session::authenticate()
 		return -1;
 	}
 	// DER encoding of server pubkey
-	if (EVP_SignUpdate(&md_ctx, b1, pubkeylen) != 1) {
+	if (EVP_SignUpdate(md_ctx.get(), b1, pubkeylen) != 1) {
 		free(b1);
 		return -1;
 	}
 	free(b1);
 
 	unsigned int resplen = 0;
-	if (EVP_SignFinal(&md_ctx, resp, &resplen, privkey) != 1)
+	if (EVP_SignFinal(md_ctx.get(), resp, &resplen, privkey) != 1)
 		return -1;
 
 	char sbuf[const_message_size];
