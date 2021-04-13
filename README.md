@@ -1,34 +1,61 @@
-CRyptographic Admin SHell -- crash
-==================================
+CRypted Admin SHell
+===================
 
-[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=9MVF8BRMX2CWA)
+
+![logo](https://github.com/stealth/crash/blob/master/logo.jpg)
+
+
+* IPv6 ready
+* lightweight, straight forward and extensible protocol using TLS 1.2+
+  as transport layer
+* man-in-the-middle safe due to its authentication mechanism
+  which involves the servers host key into the auth process
+* built-in traffic analysis mitigation for timing and packet sizes
+* not relying on any system auth frameworks such as PAM
+* can be entirely run as user, no need to setup config files
+* passive/active connects on both ends with most flexible
+  local/remote port binding possibilites
+* easy to port to embedded systems such as routers
+* quiet/hidden mode for secret administration and take-back
+  functionality for owned boxes
+* trigger-mode via syslog, mail or other files if requested
+* emergency mode to extract all necessary key files from the running binary
+* may be started as a CGI with all above functionality, command
+  switches passed via query-string
+* integrated tcp-wrapper-like D/DoS protection
+* intentionally not passing local $ENV to remote to avoid info leaks
+* supports Perfect Forward Secrecy via DH Kex
+* can forward TCP *and* UDP sockets to remote
+* SOCKS4 and SOCKS5 support to forward browser sessions to remote
+
 
 Build
 -----
 
-You need to have a quite current version of _openssl_ installed.
-Then, just
+You need to have a reasonable version of *OpenSSL* installed. Inside the cloned git repo:
 
-    $ make
+```
+$ make
+```
 
-for Linux, and
+If you have a particular *OpenSSL* or *LibreSSL* setup, check the `Makefile` and
+set the apropriate `$SSL` variable.
 
-    $ make -f Makefile.bsd
+For embedded systems, please see at the end of this document.
+*crash* was successfully tested on *Linux, FreeBSD, NetBSD, OpenSolaris, OSX and Android*.
 
-for BSD etc. For embedded systems please see at the end of this document.
-_crash_ was successfully tested on Linux (openSUSE 10.3, 11.1, 12.3, 13.1),
-FreeBSD 7.2, OpenSolaris and OSX 10.8. It probably runs on a lot of other Linux
-and BSD's but I was not able to test it there yet.
+After that, to generate the required server and authentication keys:
 
-To generate server and authentication keys:
-
-    $ make keys
+```
+$ make keys
+```
 
 or see further instructions in this document. If you want to use _ephemeral keying_
-(aka [PFS](http://en.wikipedia.org/wiki/Perfect_Forward_Secrecy)),
-invoke
+(aka [PFS](http://en.wikipedia.org/wiki/Perfect_Forward_Secrecy)), invoke
 
-    $ ./newdh
+```
+$ ./newdh
+```
 
 before `make` in order to generate DH parameters before the build.
 
@@ -36,108 +63,145 @@ before `make` in order to generate DH parameters before the build.
 Run
 ---
 
-_crash_ does not need any config or option files to run. Its easy and
+*crash* does not need any config or option files to run. Its easy and
 straight forward to use. Anything can be enabled/disabled by
 runtime switches:
 
 ```
 stealth@linux ~> ./crashd -h
-./crashd: invalid option -- h
 
-Usage:  ./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A authorized keys]
-                 [-k server key-file] [-c server X509 certificate]
-                 [-t trigger-file] [-m trigger message] [-e] [-g good IPs]
+crypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash
 
-                 -a -- always login (if authenticated), even with a /bin/false default shell
-                 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
-                 -e -- extract key and certfile from the binary itself (no -k/-c needed)
-                 -q -- quiet mode, turns off logging and utmp entries
-                 -6 -- use IPv6 rather than IPv4
-                 -w -- wrap around PID's so crashd appears in system PID space
-                 -H -- host/IP to connect to; if omitted it uses passive connect (default)
-                 -p -- port to connect/listen to; default is 2222
-                 -P -- local port used in active connects (default is no bind)
-                 -g -- file containing list of good IP/IP6's in D/DoS case (default off)
-                 -A -- authorized-key files for users if starts with '/'; subdir in users ~
-                       containing authorized_keys file otherwise; 'self' means to use
-                       blob-extraction (see -e); default is .crash
-                 -k -- servers key file; default is ./serverkey.pem
-                 -c -- X509 certificate-file that belongs to serverkey (-k); default is ./pubkey.x509
-                 -t -- watch a triggerfile for certain message (-m) before connect/listen
-                 -m -- wait with connect/listen until message in file (-t) is seen
+./crashd: invalid option -- 'h'
 
+Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
+	 [-k server key-file] [-c server X509 certificate] [-P port]
+	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs]
+
+	 -a -- always login if authenticated, despite false/nologin shells
+	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
+	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
+	 -q -- quiet mode, turns off logging and utmp entries
+	 -6 -- use IPv6 rather than IPv4
+	 -w -- wrap around PID's so crashd appears in system PID space
+	 -H -- host to connect to; if omitted: passive connect (default)
+	 -p -- port to connect/listen to; default is 2222
+	 -P -- local port used in active connects (default is no bind)
+	 -g -- file containing list of good IP/IP6's in D/DoS case (default off)
+	 -A -- authorized-key file for users if starts with '/'; folder inside ~
+	       containing authorized_keys file otherwise; 'self' means to use
+	       blob-extraction (see -e); default is .crash
+	 -k -- servers key file; default is ./serverkey.priv
+	 -c -- X509 certificate-file that belongs to serverkey (-k);
+	       default is ./serverkey.pub
+	 -t -- watch triggerfile for certain message (-m) before connect/listen
+	 -m -- wait with connect/listen until message in file (-t) is seen
 ```
 
-Most of it is pretty self-explaining. _crashd_ can run as user. `-U` makes
-it skipping apropriate _setuid()_ calls, effectively being able to run as user.
-It only accepts logins to that user then by checking login name's UID against
-current EUID.
-Both, _crashc_ and _crashd_ can use active and passive connect. Whenever
+Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
+skip *setuid()* calls, effectively being able to run as user. In this case, it only accepts
+logins to that user then by checking login name's `uid` against current `euid`.
+Both, *crashc* and *crashd* can use active and passive connects. Whenever
 a host-argument `-H` is given, it uses active connect to this host
 and the belonging port `-p`. If `-H` is given, it also accepts
-`-P` which specifies the local port it has to bind to before
-doing active connect.
-If `-w` is used it forks itself as __[nfsd]__ and tries to wrap around its
-PID to be somewhere around the system daemons. This can take a while!
+`-P` which specifies the local port it has to bind to before doing active connect.
+Without `-H` it will listen for incoming connects.
+If `-w` is used it forks itself as **[nfsd]_**and tries to wrap around its
+`pid` to be somewhere around the system daemons.
+
+For testing, when you did `make keys` (next section), you can just run
+`crashd -U -p 2222` and `crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER`.
+
 
 Key setup
 ---------
 
 The easiest way is to just
 
-    $ make keys
+```
+$ make keys
+```
 
 But you can also do it by hand. To generate a X509 certificate containing the server key:
 
-    $ umask 066
-    $ openssl genrsa -out serverkey.pem 4096
-    $ openssl req -new -x509 -nodes -sha1 -key serverkey.pem -out pubkey.x509
+```
+$ umask 066
+$ openssl genrsa -out serverkey.pem 4096
+$ openssl req -new -x509 -nodes -sha1 -key serverkey.pem -out pubkey.x509
+```
 
-To extract the public key in a form _crashc_ can use it as a hostkey for comparison:
+To extract the public key in a form *crashc* can use it as a hostkey for comparison:
 
-    $ openssl x509 -in pubkey.x509 -pubkey -noout > HK_127.0.0.1
+```
+$ openssl x509 -in pubkey.x509 -pubkey -noout > HK_127.0.0.1
+```
 
 So you have `HK_127.0.0.1` as the known-hosts keyfile for this host.
-As an alternative, you can use _crashc_ with `-v` upon connect to
+As an alternative, you can use *crashc* with `-v` upon connect to
 extract the pubkey. But note that this might already be a key presented to
 you during an attack. So only do that if you know that the connection is
 not tampered with (e.g. single user on localhost).
 
-The values you enter for __Country-Name__, __Email__, __CN__ etc. do not matter
-since _crashc_ is not validating the X509. Rather it compares the public
-key it obtained from the server with the key it has in its local
-key-store belonging to that server (similar to _SSH_). That way,
-_crashc_ cannot fall into the common X509 traps like a lot
-of web browsers do.
-The server key is not encrypted since _crashd_ is usually started
-via init scripts. Rather, the key file must have proper permissions
+The values you enter for *Country-Name, Email, CN* etc. do not matter
+since *crashc* is not validating the X509. It just compares the public
+key value it obtained from the server with the key it has in its local
+key-store belonging to that server (similar to *SSH*).
+The server key is not encrypted since *crashd* is usually started
+via init scripts. Instead, the key file must have proper permissions
 so only apropriate users can read it (mode 0600). You can, if you like,
 also encrypt the server key but then you have to enter a passphrase
-whenever _crashd_ is started.
+whenever *crashd* is started.
 
 To generate a public/private RSA keypair for your authentication:
 
-    $ openssl genrsa -out privkey.pem -aes256 4096
-    $ openssl rsa -in privkey.pem -pubout -out pubkey.pem
+```
+$ openssl genrsa -out privkey.pem -aes256 4096
+$ openssl rsa -in privkey.pem -pubout -out pubkey.pem
+```
 
 Copy `pubkey.pem` to `~/.crash/authorized_keys` on the remote box, and
 use `privkey.pem` for the `crashc -i` argument.
 
-Auth-Key sizes larger than __7500 bit__ must not be used;
+Auth-Key sizes larger than *7500 bit* must not be used;
 the tokens do not fit into the auth handshake otherwise.
 
-_crashc_ is using the `.crash/` subdir by default to check for
-already seen server keys. If you connect to a host via `-H $host -p $port`
-then a keyfile of form `.crash/HK_$host:$port` is looked up unless
-you specify a path to a known keyfile.
+*crashc* is using the `.crash/` subdir by default to check for
+already seen server keys. If you connect to a host via `-H $host -p $port`,
+a keyfile of form `.crash/HK_$host:$port` is looked up unless you specify an
+absolute path to a known keyfile.
+
+Connect w/o Hostkeys
+--------------------
+
+The crash auth protocol incorporates the server host key when signing authentication
+requests. This way its not strictly necessary to check server host keys as
+you know it from SSH password authentication. Two things have to be considered
+if host-key checks are supressed with `-K none ` though:
+
+* The username will potentially leak to a MiM server
+
+This is not an issue if you use a system user-name such as `root`.
+
+* The MiM could sort of phish you, by showing you a fake-shell where
+  you think it belongs to your real server. This could be used to
+  wait for `su` and similar commands and to record sensitive information
+  as you type on the MiM shell.
+
+To conquer this, you have to make sure you are indeed on your real shell
+when you see the prompt. This can be achieved by echoing a secret token
+to the tty upon login, for example via one of the `.profile` or `.bashrc`
+files. As the MiM cannot know this token, you can be sure you have a
+confidential and untampared session when you see this token upon login;
+even if you omit the host-key check.
+
 
 CGI
 ---
 
-_crashd_ automatically detects whether it has been invoked as a CGI by
-a webserver by checking __$QUERY_STRING__ environment variable. It parses
+*crashd* automatically detects whether it has been invoked as a CGI by
+a webserver by checking `QUERY_STRING` environment variable. It parses
 and converts the query-string into arguments it understands. It
-does not translate %2F etc characters! They should not be needed,
+does not translate `%2F` etc characters! They should not be needed,
 since spaces, '(' and other weird characters do not make sense when
 calling crashd. Arguments that dont have a parameter such as `-U`
 have to be given `=1` argument to enable it, such as in:
@@ -147,30 +211,35 @@ http://127.0.0.1/cgi-bin/crashd?-K=/path/to/serverkey.pem&    \
       -C=/path/to/pubkey.x509&-p=1234&-A=/tmp/.crash/authorized_keys&-U=1&-a=1
 ```
 
-which invokes _crashd_ on the host 127.0.0.1 as user (probably "wwwrun" or whatever
+which invokes *crashd* on the host 127.0.0.1 as user (probably "wwwrun" or whatever
 the webserver is running as).
-For pentesting or embedded/emergency systems, crashd has the `-e` option.
+For pentesting or in emergency case, *crashd* has the `-e` option.
 If `-e` is used, it extracts the server key-file and the X509 certificate
-from the ELF binary file, which have to be appended first:
+from the ELF binary file, which have to be appended before using `-e`:
 
-    $ cat serverkey.pem>>crashd
-    $ cat pubkey.x509>>crashd
+```
+$ cat serverkey.pub>>crashd
+$ cat serverkey.priv>>crashd
+$ cat authkey.pub>>crashd
+```
 
 If you give `-A self` instead of a valid authentication directory or file,
-it also extracts the user-key used for authentication from its binary.
-It has to be appended in the same manner as above. This is useful in pentests
-where you cannot upload arbitrary amount of files or do not know the
-exact pathname of the upload storage:
+*crashd* also extracts the user-key used for authentication from its binary.
 
-    $ curl 'http://127.0.0.1/cgi-bin/crashd?-A=self&-U=1&-e=1&-a=1'
+This is useful in pentests where you cannot upload arbitrary amount of files
+or you do not know the exact pathname of the upload storage:
 
-`-a` is needed since most likely the _wwwrun_ user has a _/bin/false_ shell,
+```
+$ curl 'http://127.0.0.1/cgi-bin/crashd?-A=self&-U=1&-e=1&-a=1'
+```
+
+`-a` is needed since most likely the *wwwrun* user has a `/bin/false` shell,
 which `-a` ignores.
-_crashd_ is using _mkstemp()_ to store the key files temporarily, with
-mode 0444 (world readable!) since it needs to access authentication
+*crashd* is using `mkstemp()` to store the key files temporarily, with
+mode 0444 (world readable) since it needs to access authentication
 files as user. So be warned that, if you have users, they may read
 the private key used during SSL handshake. After all, its just an
-emergency mode!!! Stripping the _crashd_ binary is not possible after
+emergency mode. Stripping the *crashd* binary is not possible after
 appending the keys, or they will get lost.
 Back-connect etc. also work in CGI mode as well.
 If using that, client should use `-K` switch to tell client which key to use
@@ -180,6 +249,9 @@ to authenticate the server.
 
 cross-build for speedport/fritzbox DSL routers
 ----------------------------------------------
+
+This section is just here for historical reasons. It's from the early
+2000's when hacking DSL modems was a widespread hobby.
 
 In Germany, these devices are quite common and support open build
 environment/SDK since the firmware is based on Linux and available

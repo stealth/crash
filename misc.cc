@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -44,10 +44,22 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include "misc.h"
 #include "global.h"
 
 
 using namespace std;
+
+namespace crash {
+
+
+string slen(unsigned short l)
+{
+	char buf[32] = {0};
+	snprintf(buf, sizeof(buf) - 1, "%05hu", l);
+	return buf;
+}
+
 
 int readn(int fd, void *buf, size_t len)
 {
@@ -79,12 +91,40 @@ int writen(int fd, const void *buf, size_t len)
 }
 
 
-void fix_size(int fd)
+void pad_nops(string &s)
 {
-	struct winsize win;
+	const uint8_t nop_fix = 5 + 6;	// %05hu:C:NO:
 
-	if (ioctl(0, TIOCGWINSZ, (char*)&win) >= 0)
-		ioctl(fd, TIOCSWINSZ, (char*)&win);
+	const auto l = s.size();
+	int pads = 0;
+
+	if (l + nop_fix >= MTU)
+		return;
+
+	char zeros[MTU] = {0};
+
+	if (l + nop_fix > 1024)
+		pads = MTU - l - nop_fix;
+	else if (l + nop_fix > 512)
+		pads = 1024 - l - nop_fix;
+	else if (l + nop_fix > 256)
+		pads = 512 - l - nop_fix;
+	else
+		pads = 256 - l - nop_fix;
+
+	// Huh?
+	if (pads < 0 || pads > 512)
+		return;
+
+	s += slen(6 + pads);
+	s += ":C:NO:";
+	s += string(zeros, pads);
+}
+
+
+string ping_packet()
+{
+	return "00010:C:PP:ping";
 }
 
 
@@ -195,7 +235,7 @@ void read_good_ips(const string &path)
 bool is_good_ip(const struct in_addr &in)
 {
 	char dst[128];
-	if (inet_ntop(AF_INET, &in, dst, sizeof(dst)) == NULL)
+	if (inet_ntop(AF_INET, &in, dst, sizeof(dst)) == nullptr)
 		return 0;
 	if (global::good_ips.find(dst) != global::good_ips.end())
 		return 1;
@@ -215,7 +255,7 @@ bool is_good_ip(const struct in_addr &in)
 bool is_good_ip(const struct in6_addr &in6)
 {
 	char dst[128];
-	if (inet_ntop(AF_INET6, &in6, dst, sizeof(dst)) == NULL)
+	if (inet_ntop(AF_INET6, &in6, dst, sizeof(dst)) == nullptr)
 		return 0;
 	if (global::good_ips.find(dst) != global::good_ips.end())
 		return 1;
@@ -232,4 +272,5 @@ bool is_nologin(const string &shell)
 	return 0;
 }
 
+}
 

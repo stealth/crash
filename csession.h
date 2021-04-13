@@ -29,51 +29,85 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef crash_server_h
-#define crash_server_h
 
-#include <sys/types.h>
-#include <time.h>
-#include <sys/time.h>
 #include <string>
-#include <map>
-#include "net.h"
-#include "log.h"
+#include <termios.h>
 
 extern "C" {
 #include <openssl/opensslv.h>
 #include <openssl/ssl.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
 }
+
+
+#include "net.h"
+#include "misc.h"
+
+#ifndef crash_csession_h
+#define crash_csession_h
+
 
 namespace crash {
 
-class Server {
 
-	int sock_fd;
-	Socket *sock;
-	std::string err;
+class client_session {
+
+	int d_sock_fd{-1}, d_peer_fd{-1};
+	Socket *d_sock{nullptr};
+
+	std::string d_err{""};
+	std::string d_sbanner{""};
+	SSL_CTX *d_ssl_ctx{nullptr};
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
-	const SSL_METHOD *ssl_method;
+	const SSL_METHOD *d_ssl_method{nullptr};
 #else
-	SSL_METHOD *ssl_method;
+	SSL_METHOD *d_ssl_method{nullptr};
 #endif
-	SSL_CTX *ssl_ctx;
 
-	std::map<std::string, time_t> connects;
-	static unsigned short min_time_between_reconnect;
+	SSL *d_ssl{nullptr};
+	EVP_PKEY *d_pubkey{nullptr}, *d_privkey{nullptr};
+
+	state *d_fd2state{nullptr};
+
+	pollfd *d_pfds{nullptr};
+
+	struct termios d_tattr, d_old_tattr;
+
+	uint16_t d_major{2}, d_minor{0};
+
+	bool d_has_tty{0};
+
+protected:
+
+	int handle_input(int);
+
+	int send_window_size();
+
+	int check_server_key();
+
+	int authenticate();
+
 public:
 
-	Server();
+	client_session()
+	{
+	}
 
-	~Server();
-
-	const char *why() { return err.c_str(); };
+	~client_session();
 
 	int setup();
 
-	int loop();
+	int handle();
+
+	const char *why()
+	{
+		return d_err.c_str();
+	}
+
 };
+
 
 }
 

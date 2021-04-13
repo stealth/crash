@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2015 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,7 +31,7 @@
  */
 
 #include <unistd.h>
-#include <errno.h>
+#include <cerrno>
 #include <cstring>
 #include <sys/types.h>
 #include <sys/socket.h>

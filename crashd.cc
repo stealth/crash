@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,30 +49,32 @@ extern "C" {
 
 
 using namespace std;
+using namespace crash;
 
 
 void help(const char *p)
 {
-	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A authorized keys]\n"
-	       "\t\t [-k server key-file] [-c server X509 certificate] [-P port]\n"
-	       "\t\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs]\n\n"
-	       "\t\t -a -- always login (if authenticated), even with a /bin/false default shell\n"
-	       "\t\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
-	       "\t\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
-	       "\t\t -q -- quiet mode, turns off logging and utmp entries\n"
-	       "\t\t -6 -- use IPv6 rather than IPv4\n"
-	       "\t\t -w -- wrap around PID's so crashd appears in system PID space\n"
-	       "\t\t -H -- host/IP to connect to; if omitted it uses passive connect (default)\n"
-	       "\t\t -p -- port to connect/listen to; default is %s\n"
-	       "\t\t -P -- local port used in active connects (default is no bind)\n"
-	       "\t\t -g -- file containing list of good IP/IP6's in D/DoS case (default off)\n"
-	       "\t\t -A -- authorized-key files for users if starts with '/'; subdir in users ~\n"
-	       "\t\t       containing authorized_keys file otherwise; 'self' means to use\n"
-	       "\t\t       blob-extraction (see -e); default is %s\n"
-	       "\t\t -k -- servers key file; default is %s\n"
-	       "\t\t -c -- X509 certificate-file that belongs to serverkey (-k); default is %s\n"
-	       "\t\t -t -- watch a triggerfile for certain message (-m) before connect/listen\n"
-	       "\t\t -m -- wait with connect/listen until message in file (-t) is seen\n\n",
+	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]\n"
+	       "\t [-k server key-file] [-c server X509 certificate] [-P port]\n"
+	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs]\n\n"
+	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
+	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
+	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
+	       "\t -q -- quiet mode, turns off logging and utmp entries\n"
+	       "\t -6 -- use IPv6 rather than IPv4\n"
+	       "\t -w -- wrap around PID's so crashd appears in system PID space\n"
+	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
+	       "\t -p -- port to connect/listen to; default is %s\n"
+	       "\t -P -- local port used in active connects (default is no bind)\n"
+	       "\t -g -- file containing list of good IP/IP6's in D/DoS case (default off)\n"
+	       "\t -A -- authorized-key file for users if starts with '/'; folder inside ~\n"
+	       "\t       containing authorized_keys file otherwise; 'self' means to use\n"
+	       "\t       blob-extraction (see -e); default is %s\n"
+	       "\t -k -- servers key file; default is %s\n"
+	       "\t -c -- X509 certificate-file that belongs to serverkey (-k);\n"
+	       "\t       default is %s\n"
+	       "\t -t -- watch triggerfile for certain message (-m) before connect/listen\n"
+	       "\t -m -- wait with connect/listen until message in file (-t) is seen\n\n",
 	       p, config::port.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
 	       config::certfile.c_str());
 }
@@ -81,7 +83,7 @@ void help(const char *p)
 void sig_chld(int)
 {
 	pid_t pid = 0;
-	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+	while ((pid = waitpid(-1, nullptr, WNOHANG)) > 0) {
 		// If its the real crashd w/o a session, we run as root,
 		// so clean up leaving sessions
 		if (getpid() == global::crashd_pid)
@@ -110,9 +112,9 @@ int main(int argc, char **argv)
 
 	// First of all, some ugly parsing, so it can be called
 	// via CGI too!
-	char *ptr1 = NULL, *ptr2 = NULL, *ptr3 = NULL;
-	if ((ptr1 = getenv("QUERY_STRING")) != NULL) {
-		setbuffer(stdout, NULL, 0);
+	char *ptr1 = nullptr, *ptr2 = nullptr, *ptr3 = nullptr;
+	if ((ptr1 = getenv("QUERY_STRING")) != nullptr) {
+		setbuffer(stdout, nullptr, 0);
 		printf("Content-Type: text/html\r\n\r\n");
 		argv = (char **)malloc(100 * sizeof(char *));
 		if (!argv) {
@@ -123,7 +125,7 @@ int main(int argc, char **argv)
 		memset(argv, 0, 100 * sizeof(char *));
 		argv[0] = strdup("[nfsd]");
 
-		while (i < 20 && (ptr2 = strchr(ptr1, '&')) != NULL) {
+		while (i < 20 && (ptr2 = strchr(ptr1, '&')) != nullptr) {
 			*ptr2 = 0;
 			ptr3 = strchr(ptr1, '=');
 			if (!ptr3)
@@ -140,7 +142,7 @@ int main(int argc, char **argv)
 		}
 
 		// last key=value pair, w/o &
-		if ((ptr2 = strchr(ptr1, '=')) != NULL) {
+		if ((ptr2 = strchr(ptr1, '=')) != nullptr) {
 			*ptr2 = 0;
 			argv[i++] = strdup(ptr1);
 			if (strcmp(ptr2 + 1, "1"))
@@ -150,6 +152,8 @@ int main(int argc, char **argv)
 		for (i = 0; i < argc; ++i)
 			printf("%s\r\n\r\n", argv[i]);
 	}
+
+	printf("\ncrypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
 	while ((c = getopt(argc, argv, "6qH:p:A:t:m:k:c:P:g:Uwea")) != -1) {
 		switch (c) {
@@ -211,13 +215,13 @@ int main(int argc, char **argv)
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_flags = SA_RESTART;
 	sa.sa_handler = sig_chld;
-	sigaction(SIGCHLD, &sa, NULL);
+	sigaction(SIGCHLD, &sa, nullptr);
 
 	sa.sa_handler = SIG_IGN;
-	sigaction(SIGPIPE, &sa, NULL);
+	sigaction(SIGPIPE, &sa, nullptr);
 
 	sa.sa_handler = sig_alarm;
-	sigaction(SIGALRM, &sa, NULL);
+	sigaction(SIGALRM, &sa, nullptr);
 
 	if (RAND_load_file("/dev/urandom", 256) != 256)
 		RAND_load_file("/dev/random", 8);
@@ -264,7 +268,7 @@ int main(int argc, char **argv)
 			config::user_keys = config::keyfile;
 	}
 
-	Server *s = new Server;
+	Server *s = new (nothrow) Server;
 	if (!s)
 		return 1;
 

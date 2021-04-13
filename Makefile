@@ -11,22 +11,30 @@ LIBS=../openssl/libssl.a ../openssl/libcrypto.a -lutil
 STRIP=$(CROSS_COMPILE)strip
 else
 
+#SSL=/opt/ssl/openssl-1.1.1
+INC=
+
+ifeq ($(shell uname), Linux)
+	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib
+	CFLAGS+=-DHAVE_UNIX98
+else ifeq ($(shell uname), Solaris)
+	LIBS+=-lssl -lcrypto -lsocket -lnsl
+else ifeq ($(shell uname), Darwin)
+	SSL=/usr/local/ssl
+	LIBS+=-lssl -lcrypto
+	CFLAGS+=-DHAVE_UNIX98
+else
+	LIBS+=-lssl -lcrypto -lutil
+endif
+
+endif
+
 CXX=c++
-#INC=-I/usr/local/ssl/include
-CFLAGS=-Wall -O2 -DHAVE_UNIX98 -std=c++11 -pedantic $(INC)
-#LIBS=-Wl,--rpath=/usr/local/ssl/lib -L/usr/local/ssl/lib
+INC+=-I$(SSL)/include
+CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC)
+LIBS+=-L$(SSL)/lib
 LD=c++
 STRIP=strip
-
-ifeq ($(shell uname -o), GNU/Linux)
-	LIBS+=-lssl -lcrypto -lutil
-else ifeq ($(shell uname -o), Solaris)
-	LIBS+=-lssl -lcrypto -lsocket -lnsl
-else
-	LIBS+=-lssl -lcrypto
-endif
-
-endif
 
 all: crashd crashc
 
@@ -54,7 +62,7 @@ keys:
 	@echo "and use '-i authkey.priv' on the client to connect to it"
 	@echo
 	@echo "Your known-host key which belongs to serverkey.priv is in HK_127.0.0.1"
-	@echo "and you can use it with '-K HK_127.0.0.1' on the client."
+	@echo "and you can use it with '-K HK_127.0.0.1' on the client (taking 127.0.0.1 as example)"
 	@echo
 	@echo "For example you can start './crashd' as root on localhost and use"
 	@echo "'./crashc -K ./HK_127.0.0.1 -H 127.0.0.1 -l user -i authkey.priv'"

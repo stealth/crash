@@ -36,6 +36,8 @@
 #include <string>
 #include <sys/types.h>
 
+namespace crash {
+
 class logger {
 
 public:
@@ -53,6 +55,7 @@ public:
 
 extern logger &syslog();
 
+}
 
 #endif
 

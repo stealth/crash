@@ -1,9 +1,10 @@
+#include <map>
 #include <string>
 
 namespace config
 {
 	bool verbose = 0, silent = 0, v6 = 0, uid_change = 1, wrap = 0,
-	     always_login = 0, extract_blob = 0;
+	     always_login = 0, extract_blob = 0, rand_traffic = 0, no_hk_check = 0;
 
 	std::string keyfile = "./serverkey.priv", certfile = "./serverkey.pub";
 	std::string host = "", port = "2222", local_port = "";
@@ -32,5 +33,9 @@ namespace config
 	std::string tfile = "/var/log/messages", tmsg = "";
 
 	std::string good_ip_file = "";
+
+	std::map<std::string, std::string> tcp_listens, udp_listens;
+
+	int socks5_port = -1, socks5_fd = -1, socks4_port = -1, socks4_fd = -1;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,11 +34,67 @@
 #define crash_misc_h
 
 #include <string>
+#include <cstdint>
+#include <deque>
+#include <time.h>
 #include <netinet/in.h>
+
+namespace crash {
+
+
+enum {
+
+	STATE_INVALID		=	0,
+	STATE_PTY		=	1,
+	STATE_STDIN		=	2,
+	STATE_STDOUT		=	3,
+	STATE_STDERR		=	4,
+	STATE_SSL		=	5,
+
+	STATE_ACCEPT		=	6,
+	STATE_CONNECT		=	7,
+	STATE_CONNECTED		=	8,
+	STATE_CLOSING		=	9,
+	STATE_UDPCLIENT		=	10,
+	STATE_UDPSERVER		=	11,
+	STATE_SOCKS5_ACCEPT	=	12,
+	STATE_SOCKS5_AUTH1	=	13,
+	STATE_SOCKS5_AUTH2	=	14,
+	STATE_SOCKS4_ACCEPT	=	15,
+	STATE_SOCKS4_AUTH	=	16,
+
+	CLOSING_TIME		=	10,
+	CONNECT_TIME		=	30,
+	UDP_CLOSING_TIME	=	120,
+
+	MTU			=	1500,
+	MSG_BSIZE		=	1024,
+
+	NETCMD_SEND_ALLOW	=	1
+};
+
+struct state {
+	time_t time{0};
+	int fd{-1};
+	int state{STATE_INVALID};
+	std::string obuf{""}, ibuf{""}, rnode{""};
+
+	// must only be pushed/popped in pairs. Each reply datagram needs a port on 127.0.0.1
+	// where it is sent to
+	std::deque<std::string> odgrams;
+	std::deque<uint16_t> ulports;
+};
+
+
+std::string slen(unsigned short);
 
 int writen(int fd, const void *buf, size_t len);
 
 int readn(int fd, void *buf, size_t len);
+
+void pad_nops(std::string &);
+
+std::string ping_packet();
 
 void sig_winch(int);
 
@@ -55,6 +111,8 @@ bool is_good_ip(const struct in_addr &);
 bool is_good_ip(const struct in6_addr &);
 
 bool is_nologin(const std::string &);
+
+}
 
 #endif
 

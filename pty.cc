@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2009 Sebastian Krahmer.
+ * Copyright (C) 2001-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,12 +30,17 @@
  * SUCH DAMAGE.
  */
 
+#ifdef __linux__
+#define _POSIX_C_SOURCE  200809L
+#endif
+
 #include "pty.h"
 #include <sys/types.h>
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
+#include <cerrno>
 #include <sys/stat.h>
 #include <string>
 #include <cstring>
@@ -44,7 +49,7 @@ using namespace std;
 
 pty::pty(const pty &rhs)
 {
-	if (this == &rhs) 
+	if (this == &rhs)
 		return;
 	_slave = dup(rhs._slave); _master = dup(rhs._master);
 	m = rhs.m; s = rhs.s;
@@ -64,6 +69,7 @@ pty &pty::operator=(const pty &rhs)
 // returns 0 on sucess, -1 on failure
 int pty::open()
 {
+#ifdef OLD_BSD_PTY
 	char ptys[] = "/dev/ptyXY";
 	const char *it1 = "pqrstuvwxyzPQRST",
 	           *it2 = "0123456789abcdef";
@@ -96,8 +102,29 @@ int pty::open()
 	}
 
 	// out of terminals
-	serr = "Dance the funky chicken (or use Unix98 pty's).";
+	serr = "Out of ptys.";
 	return -1;
+
+#else
+	if ((_master = posix_openpt(O_RDWR|O_NOCTTY)) < 0) {
+		serr = strerror(errno);
+		return -1;
+	}
+
+	grantpt(_master);
+	unlockpt(_master);
+	s = ptsname(_master);
+
+	// master finished. Do slave-part.
+	if ((_slave = ::open(s.c_str(), O_RDWR|O_NOCTTY)) < 0) {
+		::close(_master);
+		serr = strerror(errno);
+		return -1;
+	}
+
+	fchmod(_slave, 0600);
+	return 0;
+#endif
 }
 
 
@@ -132,14 +159,17 @@ int pty::close()
 
 int pty::grant(uid_t u, gid_t g, mode_t mode)
 {
+#ifdef OLD_BSD_PTY
 	if (fchmod(_master, mode) < 0 || fchmod(_slave, mode) < 0) {
 		serr = strerror(errno);
 		return -1;
 	}
+	mode_t mask = umask(0);
 	if (fchown(_master, u, g) < 0 || fchown(_slave, u, g) < 0) {
 		serr = strerror(errno);
 		return -1;
 	}
+#endif
 	return 0;
 }
 

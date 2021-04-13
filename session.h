@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,9 +33,12 @@
 #ifndef crash_session_h
 #define crash_session_h
 
-#include <sys/types.h>
+#include <poll.h>
 #include <unistd.h>
 #include <string>
+#include <sys/types.h>
+
+#include "misc.h"
 #include "iobox.h"
 
 extern "C" {
@@ -44,25 +47,35 @@ extern "C" {
 }
 
 
+namespace crash {
+
+
 class server_session {
-	std::string err;
-	static std::string banner;
-	int sock;
-	SSL *ssl;
-	SSL_CTX *ssl_ctx;
-	EVP_PKEY *pubkey;
 
-	string user, cmd, home, shell;
+	static std::string d_banner;
 
-	iobox iob;
+	std::string d_err{""};
 
-	uid_t final_uid;
-	char peer_ip[64];
+	int d_sock{-1};
+	SSL *d_ssl{nullptr};
+	SSL_CTX *d_ssl_ctx{nullptr};
+	EVP_PKEY *d_pubkey{nullptr};
+
+	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""};
+
+	iobox d_iob;
+
+	state *d_fd2state{nullptr};
+
+	pollfd *d_pfds{nullptr};
+
+
+	uid_t d_final_uid{0xffff};
+	char d_peer_ip[64]{0};
 
 protected:
-	int handle_command(const std::string &, char *, unsigned short);
 
-	int handle_data(const std::string &, char *, unsigned short);
+	int handle_input(int);
 
 	int authenticate();
 
@@ -74,11 +87,13 @@ public:
 
 	int handle();
 
-	int send_const_chunks(const std::string &, const char *, size_t);
-
-	const char *why() { return err.c_str(); };
-
+	const char *why()
+	{
+		return d_err.c_str();
+	}
 };
+
+}
 
 #endif
 

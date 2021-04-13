@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001-2016 Sebastian Krahmer.
+ * Copyright (C) 2001-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -45,15 +45,19 @@ using namespace std;
 class pty {
 protected:
 	// file-descriptors for terminal
-	int _master, _slave;
+	int _master{-1}, _slave{-1};
 
 	// names of device-files
-	string m, s, serr;
+	string m{""}, s{""}, serr{""};
 public:
-	pty() : _master(-1), _slave(-1), m(""), s(""), serr("") {}
+	pty()
+	{
+	}
 
-
-	virtual ~pty() { close(); }
+	virtual ~pty()
+	{
+		close();
+	}
 
 	// Copy-constructor
 	pty(const pty &rhs);

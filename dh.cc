@@ -37,8 +37,9 @@
 
 #include "dh2048.cc"
 
+namespace crash {
 
-static DH *dh2048 = NULL;
+static DH *dh2048 = nullptr;
 
 
 DH *dh_callback(SSL *ssl, int is_exported, int keylen)
@@ -49,10 +50,12 @@ DH *dh_callback(SSL *ssl, int is_exported, int keylen)
 
 int enable_dh(SSL_CTX *ctx)
 {
-	if ((dh2048 = get_dh2048()) != NULL) {
+	if ((dh2048 = get_dh2048()) != nullptr) {
 		SSL_CTX_set_tmp_dh_callback(ctx, dh_callback);
 		return 1;
 	}
 	return 0;
+}
+
 }
 

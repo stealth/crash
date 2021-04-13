@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2016 Sebastian Krahmer.
+ * Copyright (C) 2006-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,8 +32,17 @@
 #ifndef crash_net_h
 #define crash_net_h
 
+#include <map>
 #include <string>
+#include <cstdint>
+#include <poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include "misc.h"
 
+
+namespace crash {
 
 class Socket {
 protected:
@@ -53,6 +62,41 @@ public:
 	const char *why() { return error.c_str(); };
 
 };
+
+
+
+extern std::map<std::string, int> tcp_nodes2sock, udp_nodes2sock;
+
+int tcp_listen(const std::string &, const std::string &);
+
+int udp_listen(const std::string &, const std::string &);
+
+int net_cmd_handler(const std::string &, state *, pollfd *, uint32_t flags = 0);
+
+struct socks5_req {
+	uint8_t vers, cmd, mbz, atype;
+	union alignas(4) {
+		struct alignas(4) {
+			in_addr dst;
+			uint16_t dport;
+		} v4;
+		struct alignas(4) {
+			in6_addr dst;
+			uint16_t dport;
+		} v6;
+	};
+};	// no __attribute__((packed)) needed, as its properly aligned
+
+
+struct socks4_req {
+	uint8_t ver, cmd;
+	uint16_t dport;
+	uint32_t dst;
+	uint8_t id;
+};
+
+
+}
 
 #endif
 

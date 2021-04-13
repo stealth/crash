@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,6 +47,8 @@
 
 using namespace std;
 
+namespace crash {
+
 logger::logger()
 {
 	openlog("crashd", LOG_NOWAIT|LOG_PID, LOG_DAEMON);
@@ -62,7 +64,7 @@ logger::~logger()
 void logger::log(const string &msg)
 {
 	if (!config::silent)
-		syslog(LOG_NOTICE, "%s", msg.c_str());
+		::syslog(LOG_NOTICE, "%s", msg.c_str());
 }
 
 
@@ -99,7 +101,7 @@ void logger::login(const string &dev, const string &user, const string &host)
 	utx.ut_pid = getpid();
 	utx.ut_type = USER_PROCESS;
 
-	const char *ptr = NULL;
+	const char *ptr = nullptr;
 	if (strstr(dev.c_str(), "/dev/"))
 		ptr = dev.c_str() + 5;
 	else
@@ -110,7 +112,7 @@ void logger::login(const string &dev, const string &user, const string &host)
 	snprintf(utx.ut_id, sizeof(utx.ut_id), "%04x", utx.ut_pid);
 
 	timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	memcpy(&utx.ut_tv, &tv, sizeof(tv));
 
 	setutxent();
@@ -126,7 +128,7 @@ void logger::logout(pid_t pid)
 
 	timeval tv;
 	setutxent();
-	struct utmpx *t = NULL;
+	struct utmpx *t = nullptr;
 	for (;;) {
 		t = getutxent();
 
@@ -135,13 +137,15 @@ void logger::logout(pid_t pid)
 		if (t->ut_pid != pid || t->ut_type != USER_PROCESS)
 			continue;
 		t->ut_type = DEAD_PROCESS;
-		gettimeofday(&tv, NULL);
+		gettimeofday(&tv, nullptr);
 		memcpy(&t->ut_tv, &tv, sizeof(tv));
 		memset(t->ut_user, 0, sizeof(t->ut_user));
 		pututxline(t);
 		break;
 	}
 	endutxent();
+
+}
 
 }
 

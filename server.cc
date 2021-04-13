@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 Sebastian Krahmer.
+ * Copyright (C) 2009-2021 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -48,13 +48,15 @@
 
 
 using namespace std;
+using namespace crash;
+
 
 extern "C" {
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 }
 
-using namespace std;
+namespace crash {
 
 unsigned short Server::min_time_between_reconnect = 3;
 
@@ -69,7 +71,7 @@ extern int enable_dh(SSL_CTX *);
 
 
 Server::Server()
-	: sock_fd(-1), sock(NULL), ssl_method(NULL), ssl_ctx(NULL)
+	: sock_fd(-1), sock(nullptr), ssl_method(nullptr), ssl_ctx(nullptr)
 {
 }
 
@@ -91,26 +93,26 @@ int Server::setup()
 	ssl_method = SSLv23_server_method();
 
 	if (!ssl_method) {
-		err = "Server::setup::SSLv23_server_method:";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err = "Server::setup::TLS_server_method:";
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
-	if ((ssl_ctx = SSL_CTX_new(ssl_method)) == NULL) {
+	if ((ssl_ctx = SSL_CTX_new(ssl_method)) == nullptr) {
 		err = "Server::setup::SSL_CTX_new:";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 	if (SSL_CTX_use_certificate_file(ssl_ctx, config::certfile.c_str(),
 	    SSL_FILETYPE_PEM) != 1) {
 		err = "Server::setup::SSL_CTX_use_certificate():";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 	if (SSL_CTX_use_PrivateKey_file(ssl_ctx, config::keyfile.c_str(),
 	    SSL_FILETYPE_PEM) != 1) {
 		err = "Server::setup::SSL_CTX_use_PrivateKey_file():";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
@@ -123,7 +125,7 @@ int Server::setup()
 
 	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op) {
 		err = "Server::setup::SSL_CTX_set_options():";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
@@ -136,7 +138,7 @@ int Server::setup()
 
 	if (SSL_CTX_set_cipher_list(ssl_ctx, ciphers.c_str()) != 1) {
 		err = "Server::setup::SSL_CTX_set_cipher_list:";
-		err += ERR_error_string(ERR_get_error(), NULL);
+		err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
@@ -157,13 +159,13 @@ int Server::setup()
 int Server::loop()
 {
 	int peer_fd;
-	struct sockaddr *from = NULL;
+	struct sockaddr *from = nullptr;
 	struct sockaddr_in from4;
 	struct sockaddr_in6 from6;
 	socklen_t flen = 0;
 	string msg = "";
 	char dst[128];
-	time_t now = time(NULL) - 42, last_accept = 0;
+	time_t now = time(nullptr) - 42, last_accept = 0;
 	unsigned short port = 0;
 
 	if (config::v6) {
@@ -181,7 +183,7 @@ int Server::loop()
 
 	// No host -> passive
 	if (config::host.length() == 0) {
-		sock_fd = sock->blisten(strtoul(config::port.c_str(), NULL, 10));
+		sock_fd = sock->blisten(strtoul(config::port.c_str(), nullptr, 10));
 		if (sock_fd < 0) {
 			err = "Server::loop::";
 			err += sock->why();
@@ -194,7 +196,7 @@ int Server::loop()
 				continue;
 
 			// brand new D/DoS protection :-)
-			now = time(NULL);
+			now = time(nullptr);
 			if (now - last_accept <= 1) {
 				if (config::v6) {
 					if (!is_good_ip(from6.sin6_addr)) {
@@ -218,9 +220,9 @@ int Server::loop()
 					inet_ntop(AF_INET, &from4.sin_addr, dst, sizeof(dst));
 					port = ntohs(from4.sin_port);
 				}
-				msg = "New connection from ";
+				msg = "New connection from [";
 				msg += dst;
-				snprintf(dst, sizeof(dst), "p%hu", port);
+				snprintf(dst, sizeof(dst), "]:%hu", port);
 				msg += dst;
 				syslog().log(msg);
 
@@ -235,7 +237,6 @@ int Server::loop()
 					syslog().log(l);
 				}
 				syslog().log("closing connection");
-				sleep(1);
 				delete s;
 				exit(0);
 			}
@@ -243,7 +244,7 @@ int Server::loop()
 		}
 	} else {
 		if (config::local_port.length() > 0)
-			sock->blisten(strtoul(config::local_port.c_str(), NULL, 10), 0);
+			sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
 		sock_fd = sock->connect(config::host, config::port);
 		if (sock_fd < 0) {
 			err = "Server::loop::";
@@ -253,10 +254,10 @@ int Server::loop()
 		server_session *s = new (nothrow) server_session(sock_fd, ssl_ctx);
 		if (s)
 			s->handle();
-		sleep(1);
 		delete s;
 	}
 	return 0;
 }
 
+}
 
