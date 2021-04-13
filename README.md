@@ -106,7 +106,7 @@ a host-argument `-H` is given, it uses active connect to this host
 and the belonging port `-p`. If `-H` is given, it also accepts
 `-P` which specifies the local port it has to bind to before doing active connect.
 Without `-H` it will listen for incoming connects.
-If `-w` is used it forks itself as **[nfsd]_**and tries to wrap around its
+If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons.
 
 For testing, when you did `make keys` (next section), you can just run
