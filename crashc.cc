@@ -490,9 +490,9 @@ int client_session::handle()
 
 	// No need to setup window-size on non-pty calls
 	if (config::cmd.size() > 0)
-		global::window_size_changed = 1;
-	else
 		global::window_size_changed = 0;
+	else
+		global::window_size_changed = 1;
 
 	for (auto it = config::tcp_listens.begin(); it != config::tcp_listens.end(); ++it) {
 		if ((r = tcp_listen("127.0.0.1", it->first)) < 0)
