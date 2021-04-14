@@ -253,8 +253,8 @@ int server_session::authenticate()
 	memset(&pw, 0, sizeof(pw));
 	pw.pw_shell = falsch;
 
-	char pwstr[4096] = {0};
 #ifndef ANDROID
+	char pwstr[4096] = {0};
 	getpwnam_r(d_user.c_str(), &pw, pwstr, sizeof(pwstr), &pwp);
 #else
 	pwp = getpwnam(d_user.c_str());
@@ -266,6 +266,7 @@ int server_session::authenticate()
 	if (!pwp || (!config::always_login && is_nologin(pwp->pw_shell)) ||
 	    (!config::uid_change && (pwp->pw_uid != geteuid()))) {
 		d_user = "[crashd]";
+		d_err = "server_session::authenticate: Invalid username.";
 	} else {
 		d_shell = pwp->pw_shell;
 		chdir(pwp->pw_dir);

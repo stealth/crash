@@ -147,7 +147,9 @@ void logger::logout(pid_t pid)
 
 }
 
+#endif
+
 }
 
-#endif
+
 

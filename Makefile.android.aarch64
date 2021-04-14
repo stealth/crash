@@ -1,3 +1,4 @@
+#
 # setup your build environment to build for Android:
 # 1. Install NDK and clone boringssl git
 # 2. inside boringssl git, checkout the android version that you are using on your phone
@@ -9,17 +10,17 @@ NDK=/opt/android-ndk
 
 SSL=/tmp/boringssl
 
-PREFIX=$(NDK)/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin/arm-linux-androideabi-
-SYSROOT=--sysroot=$(NDK)/platforms/$(PLATFORM)/arch-arm
+PREFIX=$(NDK)/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-
+SYSROOT=--sysroot=$(NDK)/platforms/$(PLATFORM)/arch-arm64/
 SYSROOT+=-isysroot $(NDK)/sysroot
 
-INC=-isystem $(NDK)/sysroot/usr/include/arm-linux-androideabi\
+INC=-isystem $(NDK)/sysroot/usr/include/aarch64-linux-android\
     -I$(NDK)/sources/cxx-stl/gnu-libstdc++/include\
     -I$(NDK)/sources/cxx-stl/gnu-libstdc++/4.9/include/\
-    -I$(NDK)/sources/cxx-stl/gnu-libstdc++/4.9/libs/armeabi-v7a/include\
+    -I$(NDK)/sources/cxx-stl/gnu-libstdc++/4.9/libs/arm64-v8a/include\
     -I$(SSL)/include
 
-LIB=-Wl,$(NDK)/sources/cxx-stl/gnu-libstdc++/4.9/libs/armeabi-v7a/libgnustl_static.a
+LIB=-Wl,$(ROOT)/$(NDK)/sources/cxx-stl/gnu-libstdc++/4.9/libs/arm64-v8a/libgnustl_static.a
 LIB+=-L . -lssl -lcrypto
 
 DEFS=-DANDROID

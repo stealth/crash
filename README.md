@@ -38,10 +38,16 @@ You need to have a reasonable version of *OpenSSL* installed. Inside the cloned 
 $ make
 ```
 
+On BSD systems you need to install *GNU make* and type `gmake` instead.
+
 If you have a particular *OpenSSL* or *LibreSSL* setup, check the `Makefile` and
-set the apropriate `$SSL` variable.
+set the apropriate `$SSL` variable. *crash* builds also nicely with *LibreSSL* and *BoringSSL*.
 
 For embedded systems, please see at the end of this document.
+
+For Android, edit the `Makefile.android` or `Makefile.android.aarch64` to reflect
+your NDK and *BoringSSL* install and use these.
+
 *crash* was successfully tested on *Linux, FreeBSD, NetBSD, OpenSolaris, OSX and Android*.
 
 After that, to generate the required server and authentication keys:
@@ -245,6 +251,38 @@ Back-connect etc. also work in CGI mode as well.
 If using that, client should use `-K` switch to tell client which key to use
 to authenticate the server.
 
+
+TCP and UDP port forward
+------------------------
+
+*crash* uses the same network engine as [psc](https://github.com/stealth/psc). Therefore
+you may use the same `-U` and `-T` parameters as known from *psc* and which are similar
+to those of *OpenSSH's* `-L` parameter. It will bind to `lport` and will forward connections
+to `[ip]:rport`, initiating the connection from the remote host. The same works for UDP
+packets, which is not possible with SSH.
+
+
+SOCKS4 and SOCKS5 support
+-------------------------
+
+*crash* also supports forwarding of TCP connections via *SOCKS4* (`-4 port`) and *SOCKS5*
+(`-5 port`). This sets up *port* as SOCKS port for TCP connections, so for instance you
+can browse remote networks from a portshell session without the need to open any other
+connection during a pentest. For *chrome*, *SOCKS4* must be used, as the crash SOCKS implementation
+does not support resolving domain names on their own. Instead, it requires IPv4 or IPv6
+addresses to be passed along. Since *chrome* will set the *SOCKS5* protocol *address type*
+always to *domain name* (`0x03`) - even if an IP address is entered in the address bar -
+SOCKS5 is not usuable with *chrome*. But you can use *chrome* with *SOCKS4*, since this
+protocol only supports IPv4 addresses, not domain names.
+
+
+Mitigating traffic analysis
+---------------------------
+
+If you invoke *crashc* with `-R`, it will insert random internal ping packets into the stream.
+Packet sizes are always one of 256, 512, 1024 or 1500 bytes in order to make it very hard
+for a global observer to track back connections across a shell mix by monitoring traffic for unique
+packet size sequences.
 
 
 cross-build for speedport/fritzbox DSL routers
