@@ -1,9 +1,9 @@
 CRypted Admin SHell
 ===================
 
-
-![logo](https://github.com/stealth/crash/blob/master/logo.jpg)
-
+<p align="center">
+<img src="https://github.com/stealth/crash/blob/master/logo.jpg" />
+</p>
 
 * IPv6 ready
 * lightweight, straight forward and extensible protocol using TLS 1.2+
@@ -35,7 +35,7 @@ Build
 You need to have a reasonable version of *OpenSSL* installed. Inside the cloned git repo:
 
 ```
-$ make
+$ make -C src
 ```
 
 On BSD systems you need to install *GNU make* and type `gmake` instead.
@@ -53,14 +53,14 @@ your NDK and *BoringSSL* install and use these.
 After that, to generate the required server and authentication keys:
 
 ```
-$ make keys
+$ make -C src keys
 ```
 
 or see further instructions in this document. If you want to use _ephemeral keying_
 (aka [PFS](http://en.wikipedia.org/wiki/Perfect_Forward_Secrecy)), invoke
 
 ```
-$ ./newdh
+$ cd src; ./newdh
 ```
 
 before `make` in order to generate DH parameters before the build.
@@ -116,7 +116,15 @@ If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons.
 
 For testing, when you did `make keys` (next section), you can just run
-`crashd -U -p 2222` and `crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER`.
+
+```
+src $ ./crashd -U -p 2222`
+```
+and
+
+```
+src $ ./crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER`
+```
 
 
 Key setup
@@ -125,7 +133,7 @@ Key setup
 The easiest way is to just
 
 ```
-$ make keys
+$ make -C src keys
 ```
 
 But you can also do it by hand. To generate a X509 certificate containing the server key:
@@ -176,8 +184,13 @@ already seen server keys. If you connect to a host via `-H $host -p $port`,
 a keyfile of form `.crash/HK_$host:$port` is looked up unless you specify an
 absolute path to a known keyfile.
 
-Connect w/o Hostkeys
---------------------
+Hostkeys
+--------
+
+By default, *crashc* will compare server hostkeys to the local key cache
+that is found inside `~/.crash`. You may override the path of the cache folder
+or an absolute filename by using the `-K` switch. Hostkey checking may be
+suppressed by using `-K none`.
 
 The crash auth protocol incorporates the server host key when signing authentication
 requests. This way its not strictly necessary to check server host keys as
@@ -267,7 +280,7 @@ SOCKS4 and SOCKS5 support
 
 *crash* also supports forwarding of TCP connections via *SOCKS4* (`-4 port`) and *SOCKS5*
 (`-5 port`). This sets up *port* as SOCKS port for TCP connections, so for instance you
-can browse remote networks from a portshell session without the need to open any other
+can browse remote networks via *crashc* sessions without the need to open any other
 connection during a pentest. For *chrome*, *SOCKS4* must be used, as the crash SOCKS implementation
 does not support resolving domain names on their own. Instead, it requires IPv4 or IPv6
 addresses to be passed along. Since *chrome* will set the *SOCKS5* protocol *address type*
