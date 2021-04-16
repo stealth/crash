@@ -14,7 +14,7 @@ CRypted Admin SHell
 * not relying on any system auth frameworks such as PAM
 * can be entirely run as user, no need to setup config files
 * passive/active connects on both ends with most flexible
-  local/remote port binding possibilites
+  local/remote port binding possibilities
 * easy to port to embedded systems such as routers
 * quiet/hidden mode for secret administration and take-back
   functionality for owned boxes
@@ -41,7 +41,7 @@ $ make -C src
 On BSD systems you need to install *GNU make* and type `gmake` instead.
 
 If you have a particular *OpenSSL* or *LibreSSL* setup, check the `Makefile` and
-set the apropriate `$SSL` variable. *crash* builds also nicely with *LibreSSL* and *BoringSSL*.
+set the appropriate `$SSL` variable. *crash* builds also nicely with *LibreSSL* and *BoringSSL*.
 
 For embedded systems, please see at the end of this document.
 
@@ -118,12 +118,12 @@ If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
 For testing, when you did `make keys` (next section), you can just run
 
 ```
-src $ ./crashd -U -p 2222`
+src $ ./crashd -U -p 2222
 ```
 and
 
 ```
-src $ ./crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER`
+src $ ./crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER
 ```
 
 
@@ -140,14 +140,14 @@ But you can also do it by hand. To generate a X509 certificate containing the se
 
 ```
 $ umask 066
-$ openssl genrsa -out serverkey.pem 4096
-$ openssl req -new -x509 -nodes -sha1 -key serverkey.pem -out pubkey.x509
+$ openssl genrsa -out serverkey.priv 4096
+$ openssl req -new -x509 -nodes -sha1 -key serverkey.priv -out serverkey.pub
 ```
 
 To extract the public key in a form *crashc* can use it as a hostkey for comparison:
 
 ```
-$ openssl x509 -in pubkey.x509 -pubkey -noout > HK_127.0.0.1
+$ openssl x509 -in serverkey.pub -pubkey -noout > HK_127.0.0.1
 ```
 
 So you have `HK_127.0.0.1` as the known-hosts keyfile for this host.
@@ -162,19 +162,21 @@ key value it obtained from the server with the key it has in its local
 key-store belonging to that server (similar to *SSH*).
 The server key is not encrypted since *crashd* is usually started
 via init scripts. Instead, the key file must have proper permissions
-so only apropriate users can read it (mode 0600). You can, if you like,
-also encrypt the server key but then you have to enter a passphrase
+so only appropriate users can read it (mode 0600). You can, if you like,
+also encrypt the server key but then you have to enter a pass-phrase
 whenever *crashd* is started.
 
 To generate a public/private RSA keypair for your authentication:
 
 ```
-$ openssl genrsa -out privkey.pem -aes256 4096
-$ openssl rsa -in privkey.pem -pubout -out pubkey.pem
+$ openssl genrsa -out authkey.priv -aes256 4096
+$ openssl rsa -in authkey.priv -pubout -out authkey.pub
 ```
 
-Copy `pubkey.pem` to `~/.crash/authorized_keys` on the remote box, and
-use `privkey.pem` for the `crashc -i` argument.
+Copy `authkey.pub` to `~/.crash/authorized_keys` on the remote box, and
+use `authkey.priv` for the `crashc -i` argument. Note, that upon authentication
+you will be asked for the pass-phrase to unlock your private key that is
+stored locally. The pass-phrase will not travel the network.
 
 Auth-Key sizes larger than *7500 bit* must not be used;
 the tokens do not fit into the auth handshake otherwise.
@@ -195,9 +197,9 @@ suppressed by using `-K none`.
 The crash auth protocol incorporates the server host key when signing authentication
 requests. This way its not strictly necessary to check server host keys as
 you know it from SSH password authentication. Two things have to be considered
-if host-key checks are supressed with `-K none ` though:
+if host-key checks are suppressed with `-K none ` though:
 
-* The username will potentially leak to a MiM server
+* The user-name will potentially leak to a MiM server
 
 This is not an issue if you use a system user-name such as `root`.
 
@@ -210,7 +212,7 @@ To conquer this, you have to make sure you are indeed on your real shell
 when you see the prompt. This can be achieved by echoing a secret token
 to the tty upon login, for example via one of the `.profile` or `.bashrc`
 files. As the MiM cannot know this token, you can be sure you have a
-confidential and untampared session when you see this token upon login;
+confidential and untampered session when you see this token upon login;
 even if you omit the host-key check.
 
 
@@ -218,11 +220,11 @@ CGI
 ---
 
 *crashd* automatically detects whether it has been invoked as a CGI by
-a webserver by checking `QUERY_STRING` environment variable. It parses
+a web-server by checking `QUERY_STRING` environment variable. It parses
 and converts the query-string into arguments it understands. It
 does not translate `%2F` etc characters! They should not be needed,
 since spaces, '(' and other weird characters do not make sense when
-calling crashd. Arguments that dont have a parameter such as `-U`
+calling crashd. Arguments that don't have a parameter such as `-U`
 have to be given `=1` argument to enable it, such as in:
 
 ```
@@ -231,8 +233,8 @@ http://127.0.0.1/cgi-bin/crashd?-K=/path/to/serverkey.pem&    \
 ```
 
 which invokes *crashd* on the host 127.0.0.1 as user (probably "wwwrun" or whatever
-the webserver is running as).
-For pentesting or in emergency case, *crashd* has the `-e` option.
+the web-server is running as).
+For pen-testing or in emergency case, *crashd* has the `-e` option.
 If `-e` is used, it extracts the server key-file and the X509 certificate
 from the ELF binary file, which have to be appended before using `-e`:
 
@@ -245,7 +247,7 @@ $ cat authkey.pub>>crashd
 If you give `-A self` instead of a valid authentication directory or file,
 *crashd* also extracts the user-key used for authentication from its binary.
 
-This is useful in pentests where you cannot upload arbitrary amount of files
+This is useful in pen-tests where you cannot upload arbitrary amount of files
 or you do not know the exact pathname of the upload storage:
 
 ```
@@ -281,11 +283,11 @@ SOCKS4 and SOCKS5 support
 *crash* also supports forwarding of TCP connections via *SOCKS4* (`-4 port`) and *SOCKS5*
 (`-5 port`). This sets up *port* as SOCKS port for TCP connections, so for instance you
 can browse remote networks via *crashc* sessions without the need to open any other
-connection during a pentest. For *chrome*, *SOCKS4* must be used, as the crash SOCKS implementation
+connection during a pen-test. For *chrome*, *SOCKS4* must be used, as the crash SOCKS implementation
 does not support resolving domain names on their own. Instead, it requires IPv4 or IPv6
 addresses to be passed along. Since *chrome* will set the *SOCKS5* protocol *address type*
 always to *domain name* (`0x03`) - even if an IP address is entered in the address bar -
-SOCKS5 is not usuable with *chrome*. But you can use *chrome* with *SOCKS4*, since this
+SOCKS5 is not usable with *chrome*. But you can use *chrome* with *SOCKS4*, since this
 protocol only supports IPv4 addresses, not domain names.
 
 
@@ -306,19 +308,19 @@ This section is just here for historical reasons. It's from the early
 
 In Germany, these devices are quite common and support open build
 environment/SDK since the firmware is based on Linux and available
-in source. Download/unpack the SDK/tarball and the MIPS toolchain. I assume you
-are familar with building router images for these devices. The openssl
-package for the speedport __W-500V__ I tested has version 0.9.7 and I had
-to build it by hand before, so the references to the _libssl.a_
+in source. Download/unpack the SDK/tar-ball and the MIPS tool-chain. I assume you
+are familiar with building router images for these devices. The openssl
+package for the speedport **W-500V** I tested has version 0.9.7 and I had
+to build it by hand before, so the references to the *libssl.a*
 inside crash Makefile are valid. On the system I tested (500V)
-I had to make it static, since dynamic openssl library requires _libdl_
+I had to make it static, since dynamic openssl library requires *libdl*
 which was not on the device. Building a firmware image often
-calls strip on the user binaries, so take care it doesnt
+calls strip on the user binaries, so take care it doesn't
 strip off the embedded keys if using `-e`.
 
 
-Then, inside  `userapps/opensource/` directory, unpack the crash tarball,
-edit the `Makefile` to match "true" at the first _ifeq()_ and then you are able
+Then, inside  `userapps/opensource/` directory, unpack the crash tar-ball,
+edit the `Makefile` to match "true" at the first `ifeq()` and then you are able
 to just "make crashd" to build crashd for the DSL router.
 
 You can now put it into the firmware image, make it loaded at boot and you
