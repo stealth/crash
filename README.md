@@ -5,12 +5,14 @@ CRypted Admin SHell
 <img src="https://github.com/stealth/crash/blob/master/logo.jpg" />
 </p>
 
+An SSH alternative featuring:
+
 * IPv6 ready
 * lightweight, straight forward and extensible protocol using TLS 1.2+
   as transport layer
 * man-in-the-middle safe due to its authentication mechanism
   which involves the servers host key into the auth process
-* built-in traffic analysis mitigation for timing and packet sizes
+* built-in traffic blinding against timing and packet-size infoleak attacks
 * not relying on any system auth frameworks such as PAM
 * can be entirely run as user, no need to setup config files
 * passive/active connects on both ends with most flexible
@@ -46,7 +48,7 @@ set the appropriate `$SSL` variable. *crash* builds also nicely with *LibreSSL* 
 For embedded systems, please see at the end of this document.
 
 For Android, edit the `Makefile.android` or `Makefile.android.aarch64` to reflect
-your NDK and *BoringSSL* install and use these.
+your NDK and *BoringSSL* install and use these. The build was tested with `android-ndk-r17b`.
 
 *crash* was successfully tested on *Linux, FreeBSD, NetBSD, OpenSolaris, OSX and Android*.
 
@@ -89,7 +91,7 @@ Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
 	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
 	 -q -- quiet mode, turns off logging and utmp entries
 	 -6 -- use IPv6 rather than IPv4
-	 -w -- wrap around PID's so crashd appears in system PID space
+	 -w -- wrap around PID to appear in system PID space (must be last arg!)
 	 -H -- host to connect to; if omitted: passive connect (default)
 	 -p -- port to connect/listen to; default is 2222
 	 -P -- local port used in active connects (default is no bind)
@@ -113,7 +115,9 @@ and the belonging port `-p`. If `-H` is given, it also accepts
 `-P` which specifies the local port it has to bind to before doing active connect.
 Without `-H` it will listen for incoming connects.
 If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
-`pid` to be somewhere around the system daemons.
+`pid` to be somewhere around the system daemons. As `-w` is overwriting main()'s `argv` array,
+it must appear last in the option list, otherwise option processing will not work
+correctly.
 
 For testing, when you did `make keys` (next section), you can just run
 
@@ -294,10 +298,46 @@ protocol only supports IPv4 addresses, not domain names.
 Mitigating traffic analysis
 ---------------------------
 
-If you invoke *crashc* with `-R`, it will insert random internal ping packets into the stream.
-Packet sizes are always one of 256, 512, 1024 or 1500 bytes in order to make it very hard
-for a global observer to track back connections across a shell mix by monitoring traffic for unique
-packet size sequences.
+Traffic analysis mitigation has two goals. First, to make it hard to find out actual typing
+sequences and potential info leaks about whats being typed inside an encrypted, interactive
+channel. Second, to make it hard for a (semi-)global observer to track connections streams
+across packet mixes or hubs.
+
+Completely mitigating traffic analysis for a capable (global) observer is very hard.
+It would require many crash users so to sink all individual packets in a swarm and
+make it impossible to find patterns that could be used to track individual users across
+packet mixes. It would also require a fixed packet size for *all* packets as well as a
+constant delay between the sends to make all connections look equal. Even then, theres
+still the problem of the overall amount of traffic sent that may be measured and used
+to track individuals. As having constant size and delays would make the connection
+feel slow or even unusable, *crash* lets you choose between traffic policies which are
+controlled by `-R <value>`. *Value* is an integer with the following meaning:
+
+* 0: disable all padding of payloads and don't inject random traffic. The pure feeling!
+* 1: pad payload to the next 256, 512, 1024 or 1420 byte boundary, no injects (default)
+* 2: pad payload to the next 256, 512, 1024 or 1420 byte boundary, random injects client side
+* 3: pad payload to the next 256, 512, 1024 or 1420 byte boundary, random injects with server
+  responses
+* 4: pad payload to 1420 byte boundary, no injects
+* 5: pad payload to 1420 byte boundary, random injects client side
+* 6: pad payload to 1420 byte boundary, random injects with server responses
+
+1420 is an often seen TCP MSS. The values were chosen in a way so that sent data fits most
+likely into a single packet. Note however that these are the packet sizes (plus the TLS record size)
+as it is passed to the TCP stack. TCP will decide itself how it will send the segements. There is
+no way to enforce 'TCP packet sizes', but this does not matter as the deps to the actual payload
+size is already blurred.
+
+If you live in a country with restrictive egress filtering, it may be helpful to test how long
+connections can survive. Note that due to `-4` and `-U` which allows to proxy TCP *and* UDP (DNS)
+to a remote site, *crash* may be used as a [shadowsocks](https://shadowsocks.org) alternative that requires
+basically no setup and just needs a user-shell behind egress.
+
+As *crash* is using TLS as a transport, theres an automagic benefit as it will not reveal by
+protocol that theres a shell session inside and no HTTPS.
+
+If you think that all of this is paranoia, go get some product sheets for devices that
+detect and classify SSH traffic by behavioral analysis.
 
 
 cross-build for speedport/fritzbox DSL routers

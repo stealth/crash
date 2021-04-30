@@ -41,40 +41,33 @@
 
 iobox::iobox()
 {
-	in[0] = in[1] = -1;
-	out[0] = out[1] = -1;
-	err[0] = err[1] = -1;
-
-	mode = MODE_INVALID;
-
-	serr = "";
 }
 
 
 iobox::~iobox()
 {
-	if (mode == MODE_PTY)
-		_pty.close();
-	else if (mode == MODE_PIPE || mode == MODE_SOCKET) {
-		close(in[0]); close(in[1]);
-		close(out[0]); close(out[1]);
-		close(err[0]); close(err[1]);
+	if (d_mode == MODE_PTY)
+		d_pty.close();
+	else if (d_mode == MODE_PIPE || d_mode == MODE_SOCKET) {
+		close(d_in[0]); close(d_in[1]);
+		close(d_out[0]); close(d_out[1]);
+		close(d_err[0]); close(d_err[1]);
 	}
 }
 
 
 int iobox::init_pty(uid_t u, gid_t g, mode_t m)
 {
-	mode = MODE_PTY;
+	d_mode = MODE_PTY;
 
-	if (_pty.open() < 0) {
-		serr = "iobox::init_pty::";
-		serr += _pty.why();
+	if (d_pty.open() < 0) {
+		d_serr = "iobox::init_pty::";
+		d_serr += d_pty.why();
 		return -1;
 	}
-	if (_pty.grant(u, g, m) < 0) {
-		serr = "iobox::init_pty::";
-		serr += _pty.why();
+	if (d_pty.grant(u, g, m) < 0) {
+		d_serr = "iobox::init_pty::";
+		d_serr += d_pty.why();
 		return -1;
 	}
 	return 0;
@@ -83,21 +76,21 @@ int iobox::init_pty(uid_t u, gid_t g, mode_t m)
 
 int iobox::init_pipe()
 {
-	mode = MODE_PIPE;
+	d_mode = MODE_PIPE;
 
-	if (pipe(in) < 0) {
-		serr = "iobox::init_pipe:";
-		serr += strerror(errno);
+	if (pipe(d_in) < 0) {
+		d_serr = "iobox::init_pipe:";
+		d_serr += strerror(errno);
 		return -1;
 	}
-	if (pipe(out) < 0) {
-		serr = "iobox::init_pipe:";
-		serr += strerror(errno);
+	if (pipe(d_out) < 0) {
+		d_serr = "iobox::init_pipe:";
+		d_serr += strerror(errno);
 		return -1;
 	}
-	if (pipe(err) < 0) {
-		serr = "iobox::init_pipe:";
-		serr += strerror(errno);
+	if (pipe(d_err) < 0) {
+		d_serr = "iobox::init_pipe:";
+		d_serr += strerror(errno);
 		return -1;
 	}
 	return 0;
@@ -106,21 +99,21 @@ int iobox::init_pipe()
 
 int iobox::init_socket()
 {
-	mode = MODE_SOCKET;
+	d_mode = MODE_SOCKET;
 
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, in) < 0) {
-		serr = "iobox::init_socket:";
-		serr += strerror(errno);
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, d_in) < 0) {
+		d_serr = "iobox::init_socket:";
+		d_serr += strerror(errno);
 		return -1;
 	}
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, out) < 0) {
-		serr = "iobox::init_socket:";
-		serr += strerror(errno);
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, d_out) < 0) {
+		d_serr = "iobox::init_socket:";
+		d_serr += strerror(errno);
 		return -1;
 	}
-	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, err) < 0) {
-		serr = "iobox::init_socket:";
-		serr += strerror(errno);
+	if (socketpair(PF_UNIX, SOCK_DGRAM, 0, d_err) < 0) {
+		d_serr = "iobox::init_socket:";
+		d_serr += strerror(errno);
 		return -1;
 	}
 	return 0;
@@ -129,10 +122,10 @@ int iobox::init_socket()
 
 int iobox::slave0()
 {
-	if (mode == MODE_PTY) {
-		return _pty.slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.slave();
 	} else {
-		return in[0];	// read end for slave stdin
+		return d_in[0];	// read end for slave stdin
 	}
 
 	return -1;
@@ -141,11 +134,11 @@ int iobox::slave0()
 
 int iobox::close_slave0()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_slave();
 	} else {
-		close(in[0]);
-		in[0] = -1;
+		close(d_in[0]);
+		d_in[0] = -1;
 		return 0;
 	}
 	return -1;
@@ -154,10 +147,10 @@ int iobox::close_slave0()
 
 int iobox::slave1()
 {
-	if (mode == MODE_PTY) {
-		return _pty.slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.slave();
 	} else {
-		return out[1];	// write end for slave stdout
+		return d_out[1];	// write end for slave stdout
 	}
 
 	return -1;
@@ -166,11 +159,11 @@ int iobox::slave1()
 
 int iobox::close_slave1()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_slave();
 	} else {
-		close(out[1]);
-		out[1] = -1;
+		close(d_out[1]);
+		d_out[1] = -1;
 		return 0;
 	}
 
@@ -180,10 +173,10 @@ int iobox::close_slave1()
 
 int iobox::slave2()
 {
-	if (mode == MODE_PTY) {
-		return _pty.slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.slave();
 	} else {
-		return err[1];	// write end for slave stderr
+		return d_err[1];	// write end for slave stderr
 	}
 
 	return -1;
@@ -192,11 +185,11 @@ int iobox::slave2()
 
 int iobox::close_slave2()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_slave();
 	} else {
-		close(err[1]);
-		err[1] = -1;
+		close(d_err[1]);
+		d_err[1] = -1;
 		return 0;
 	}
 
@@ -206,10 +199,10 @@ int iobox::close_slave2()
 
 int iobox::master0()
 {
-	if (mode == MODE_PTY) {
-		return _pty.master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.master();
 	} else {
-		return in[1];	// write end for what appears on slave stdin
+		return d_in[1];	// write end for what appears on slave stdin
 	}
 
 	return -1;
@@ -218,11 +211,11 @@ int iobox::master0()
 
 int iobox::close_master0()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_master();
 	} else {
-		close(in[1]);
-		in[1] = -1;
+		close(d_in[1]);
+		d_in[1] = -1;
 		return -1;
 	}
 
@@ -233,10 +226,10 @@ int iobox::close_master0()
 
 int iobox::master1()
 {
-	if (mode == MODE_PTY) {
-		return _pty.master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.master();
 	} else {
-		return out[0];	// read end for slave's stdout
+		return d_out[0];	// read end for slave's stdout
 	}
 
 	return -1;
@@ -245,11 +238,11 @@ int iobox::master1()
 
 int iobox::close_master1()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_master();
 	} else {
-		close(out[0]);
-		out[0] = -1;
+		close(d_out[0]);
+		d_out[0] = -1;
 		return 0;
 	}
 
@@ -259,10 +252,10 @@ int iobox::close_master1()
 
 int iobox::master2()
 {
-	if (mode == MODE_PTY) {
-		return _pty.master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.master();
 	} else {
-		return err[0];	// read end for slave's stderr
+		return d_err[0];	// read end for slave's stderr
 	}
 
 	return -1;
@@ -271,11 +264,11 @@ int iobox::master2()
 
 int iobox::close_master2()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_master();
 	} else {
-		close(err[0]);
-		err[0] = -1;
+		close(d_err[0]);
+		d_err[0] = -1;
 		return 0;
 	}
 
@@ -285,8 +278,8 @@ int iobox::close_master2()
 
 int iobox::close_master()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_master();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_master();
 	} else {
 		close_master0();
 		close_master1();
@@ -300,8 +293,8 @@ int iobox::close_master()
 
 int iobox::close_slave()
 {
-	if (mode == MODE_PTY) {
-		return _pty.close_slave();
+	if (d_mode == MODE_PTY) {
+		return d_pty.close_slave();
 	} else {
 		close_slave0();
 		close_slave1();

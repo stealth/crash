@@ -60,27 +60,27 @@ typedef enum {
 
 class iobox {
 
-	int in[2], out[2], err[2];
+	int d_in[2]{-1, -1}, d_out[2]{-1, -1}, d_err[2]{-1, -1};
 
 #ifdef HAVE_UNIX98
-	pty98 _pty;
+	pty98 d_pty;
 #else
-	pty _pty;
+	pty d_pty;
 #endif
 
-	iobox_mode_t mode;
+	iobox_mode_t d_mode{MODE_INVALID};
 
-	std::string serr;
+	std::string d_serr{""};
 
 public:
 
-	const char *why() { return serr.c_str(); }
+	const char *why() { return d_serr.c_str(); }
 
 	iobox();
 
 	~iobox();
 
-	bool is_pty() { return mode == MODE_PTY; }
+	bool is_pty() { return d_mode == MODE_PTY; }
 
 	int init_pipe();
 
@@ -118,8 +118,8 @@ public:
 
 	const std::string pts_name()
 	{
-		if (mode == MODE_PTY)
-			return _pty.sname();
+		if (d_mode == MODE_PTY)
+			return d_pty.sname();
 		return "";
 	}
 

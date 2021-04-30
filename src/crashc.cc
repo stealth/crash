@@ -427,7 +427,7 @@ int client_session::handle()
 
 	if (config::verbose) {
 		if ((major != d_major || minor != d_minor))
-			printf("crashc: Different versions. Authentication may fail.\n");
+			printf("crashc: Different versions. Some features might not work.\n");
 		else
 			printf("crashc: Major/Minor versions match (%hu/%hu)\n", major, minor);
 	}
@@ -554,11 +554,23 @@ int client_session::handle()
 	int max_fd = d_peer_fd, i = 0, pto = 1000, afd = -1;
 	uint16_t u16 = 0;
 
-	if (config::rand_traffic) {
+	string::size_type last_ssl_qlen = 0;
+
+	if (config::traffic_flags & TRAFFIC_INJECT) {
 		// should be OK to use re-seeded RAND to obtain timeout values for poll
 		// without leaking internal PRNG state via PING-send timings?
 		RAND_load_file("/dev/urandom", 16);
 		pto = 20;
+	}
+
+	// signal padding policy to server; the inject policy is handled by client alone
+	// via different ping types
+	if (config::traffic_flags & TRAFFIC_NOPAD) {
+		d_fd2state[d_peer_fd].obuf += "00006:C:P0:";
+		d_pfds[d_peer_fd].events |= POLLOUT;
+	} else if (config::traffic_flags & TRAFFIC_PADMAX) {
+		d_fd2state[d_peer_fd].obuf += "00006:C:P9:";
+		d_pfds[d_peer_fd].events |= POLLOUT;
 	}
 
 	for (;!leave;) {
@@ -584,7 +596,7 @@ int client_session::handle()
 			continue;
 
 		// simulate some typing if configured so
-		if (config::rand_traffic && r == 0) {
+		if ((config::traffic_flags & TRAFFIC_INJECT) && r == 0) {
 			RAND_bytes(reinterpret_cast<unsigned char *>(&u16), 2);
 			pto = u16 % 1000;
 			if (d_fd2state[d_peer_fd].obuf.size() == 0) {
@@ -676,7 +688,12 @@ int client_session::handle()
 
 				if (d_fd2state[i].obuf.size() > 0) {
 
-					pad_nops(d_fd2state[i].obuf);
+					// Only pad if since last padding new payload data was added to queue.
+					// As there is only one socket (d_peer_fd) where we pad outgoing data,
+					// one variable (last_ssl_qlen) is sufficient and we don't need to have
+					// a variable inside d_fd2state.
+					if (last_ssl_qlen < d_fd2state[i].obuf.size())
+						pad_nops(d_fd2state[i].obuf);
 
 					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size());
 					switch (SSL_get_error(d_ssl, n)) {
@@ -693,7 +710,7 @@ int client_session::handle()
 					}
 					if (n > 0)
 						d_fd2state[i].obuf.erase(0, n);
-					if (d_fd2state[i].obuf.size() > 0)
+					if ((last_ssl_qlen = d_fd2state[i].obuf.size()) > 0)
 						d_pfds[i].events |= POLLOUT;
 				}
 
@@ -1009,6 +1026,8 @@ int client_session::handle_input(int i)
 
 	cmd.erase(0, 5 + len);
 
+	global::input_received = 1;
+
 	// one command was handled. There may be more in the ibuf
 	return 1;
 }
@@ -1021,7 +1040,7 @@ void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c command] [-U lport:[ip]:rport]\n"
-	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R] <-l user>\n\n"
+	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R 0-6] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
@@ -1036,7 +1055,7 @@ void help(const char *p)
 	       "\t -T -- forward TCP port lport to ip:rport on remote site\n"
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
 	       "\t -5 -- start SOCKS5 server on lport to forward TCP sessions\n"
-	       "\t -R -- enable traffic analysis mitigation\n"
+	       "\t -R -- traffic blinding policy (default 1)\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
 }
@@ -1054,10 +1073,10 @@ int main(int argc, char **argv)
 	struct sigaction sa;
 	string ostr = "";
 
-	int c = 0;
+	int c = 0, traffic_policy = 1;
 	char lport[16] = {0}, ip[128] = {0}, rport[16] = {0};
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:l:i:c:RT:U:5:4:")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:P:l:i:c:R:T:U:5:4:")) != -1) {
 		switch (c) {
 		case '6':
 			config::v6 = 1;
@@ -1089,7 +1108,7 @@ int main(int argc, char **argv)
 			config::verbose = 1;
 			break;
 		case 'R':
-			config::rand_traffic = 1;
+			traffic_policy = atoi(optarg);
 			break;
 		case 'T':
 			sscanf(optarg, "%15[0-9]:[%127[^]]]:%15[0-9]", lport, ip, rport);
@@ -1134,6 +1153,32 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (traffic_policy < 0 || traffic_policy > 6)
+		traffic_policy = 1;
+
+	switch (traffic_policy) {
+	case 0:
+		config::traffic_flags = TRAFFIC_NOPAD;
+		break;
+	case 1:
+		config::traffic_flags = TRAFFIC_PAD1;
+		break;
+	case 2:
+		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
+		break;
+	case 3:
+		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT;
+		break;
+	case 4:
+		config::traffic_flags = TRAFFIC_PADMAX;
+		break;
+	case 5:
+		config::traffic_flags = TRAFFIC_PADMAX|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
+		break;
+	case 6:
+		config::traffic_flags = TRAFFIC_PADMAX|TRAFFIC_INJECT;
+	}
+
 	if (config::verbose) {
 		printf("\ncrypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash\n\n%s\n", ostr.c_str());
 		printf("crashc: starting crypted administration shell\ncrashc: connecting to %s:%s ...\n\n",
@@ -1152,6 +1197,10 @@ int main(int argc, char **argv)
 
 	if (config::verbose)
 		printf("crashc: closing connection.\n");
+
+	if (!global::input_received)
+		fprintf(stderr, "crashc: No input received. Error. Auth failure?\n");
+
 	return 0;
 }
 

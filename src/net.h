@@ -73,17 +73,21 @@ int udp_listen(const std::string &, const std::string &);
 
 int net_cmd_handler(const std::string &, state *, pollfd *, uint32_t flags = 0);
 
+struct alignas(4) v4_tuple {
+	in_addr dst;
+	uint16_t dport;
+};
+
+struct alignas(4) v6_tuple {
+	in6_addr dst;
+	uint16_t dport;
+};
+
 struct socks5_req {
 	uint8_t vers, cmd, mbz, atype;
 	union alignas(4) {
-		struct alignas(4) {
-			in_addr dst;
-			uint16_t dport;
-		} v4;
-		struct alignas(4) {
-			in6_addr dst;
-			uint16_t dport;
-		} v6;
+		v4_tuple v4;
+		v6_tuple v6;
 	};
 };	// no __attribute__((packed)) needed, as its properly aligned
 

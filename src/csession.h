@@ -75,7 +75,7 @@ class client_session {
 
 	struct termios d_tattr, d_old_tattr;
 
-	uint16_t d_major{2}, d_minor{0};
+	uint16_t d_major{2}, d_minor{1};
 
 	bool d_has_tty{0};
 

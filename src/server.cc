@@ -58,7 +58,7 @@ extern "C" {
 
 namespace crash {
 
-unsigned short Server::min_time_between_reconnect = 3;
+unsigned short Server::d_min_time_between_reconnect = 1;
 
 
 #ifdef USE_SCIPHERS
@@ -71,16 +71,15 @@ extern int enable_dh(SSL_CTX *);
 
 
 Server::Server()
-	: sock_fd(-1), sock(nullptr), ssl_method(nullptr), ssl_ctx(nullptr)
 {
 }
 
 
 Server::~Server()
 {
-	if (ssl_ctx)
-		SSL_CTX_free(ssl_ctx);
-	delete sock;
+	if (d_ssl_ctx)
+		SSL_CTX_free(d_ssl_ctx);
+	delete d_sock;
 }
 
 
@@ -90,29 +89,29 @@ int Server::setup()
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
 	OpenSSL_add_all_digests();
-	ssl_method = SSLv23_server_method();
+	d_ssl_method = SSLv23_server_method();
 
-	if (!ssl_method) {
-		err = "Server::setup::TLS_server_method:";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+	if (!d_ssl_method) {
+		d_err = "Server::setup::TLS_server_method:";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
-	if ((ssl_ctx = SSL_CTX_new(ssl_method)) == nullptr) {
-		err = "Server::setup::SSL_CTX_new:";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+	if ((d_ssl_ctx = SSL_CTX_new(d_ssl_method)) == nullptr) {
+		d_err = "Server::setup::SSL_CTX_new:";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
-	if (SSL_CTX_use_certificate_file(ssl_ctx, config::certfile.c_str(),
+	if (SSL_CTX_use_certificate_file(d_ssl_ctx, config::certfile.c_str(),
 	    SSL_FILETYPE_PEM) != 1) {
-		err = "Server::setup::SSL_CTX_use_certificate():";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+		d_err = "Server::setup::SSL_CTX_use_certificate():";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
-	if (SSL_CTX_use_PrivateKey_file(ssl_ctx, config::keyfile.c_str(),
+	if (SSL_CTX_use_PrivateKey_file(d_ssl_ctx, config::keyfile.c_str(),
 	    SSL_FILETYPE_PEM) != 1) {
-		err = "Server::setup::SSL_CTX_use_PrivateKey_file():";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+		d_err = "Server::setup::SSL_CTX_use_PrivateKey_file():";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
@@ -123,32 +122,32 @@ int Server::setup()
 	op |= SSL_OP_NO_COMPRESSION;
 #endif
 
-	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op) {
-		err = "Server::setup::SSL_CTX_set_options():";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+	if ((unsigned long)(SSL_CTX_set_options(d_ssl_ctx, op) & op) != (unsigned long)op) {
+		d_err = "Server::setup::SSL_CTX_set_options():";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
 	// check for DHE and enable it if there are parameters
 	string::size_type dhe = ciphers.find("kDHE");
 	if (dhe != string::npos) {
-		if (enable_dh(ssl_ctx) != 1)
+		if (enable_dh(d_ssl_ctx) != 1)
 			ciphers.erase(dhe, 4);
 	}
 
-	if (SSL_CTX_set_cipher_list(ssl_ctx, ciphers.c_str()) != 1) {
-		err = "Server::setup::SSL_CTX_set_cipher_list:";
-		err += ERR_error_string(ERR_get_error(), nullptr);
+	if (SSL_CTX_set_cipher_list(d_ssl_ctx, ciphers.c_str()) != 1) {
+		d_err = "Server::setup::SSL_CTX_set_cipher_list:";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
 
 	if (config::v6)
-		sock = new (nothrow) Socket(PF_INET6);
+		d_sock = new (nothrow) Socket(PF_INET6);
 	else
-		sock = new (nothrow) Socket(PF_INET);
+		d_sock = new (nothrow) Socket(PF_INET);
 
-	if (!sock) {
-		err = "Server::setup::new:";
+	if (!d_sock) {
+		d_err = "Server::setup::new:";
 		return -1;
 	}
 
@@ -176,28 +175,27 @@ int Server::loop()
 		flen = sizeof(from4);
 	}
 
-	if (!sock) {
-		err = "Server::loop: Server not initialized!";
+	if (!d_sock) {
+		d_err = "Server::loop: Server not initialized!";
 		return -1;
 	}
 
 	// No host -> passive
 	if (config::host.length() == 0) {
-		sock_fd = sock->blisten(strtoul(config::port.c_str(), nullptr, 10));
-		if (sock_fd < 0) {
-			err = "Server::loop::";
-			err += sock->why();
+		if ((d_sock_fd = d_sock->blisten(strtoul(config::port.c_str(), nullptr, 10))) < 0) {
+			d_err = "Server::loop::";
+			d_err += d_sock->why();
 			return -1;
 		}
 		for (;;) {
 			last_accept = now;
-			peer_fd = accept(sock_fd, from, &flen);
+			peer_fd = accept(d_sock_fd, from, &flen);
 			if (peer_fd < 0)
 				continue;
 
 			// brand new D/DoS protection :-)
 			now = time(nullptr);
-			if (now - last_accept <= 1) {
+			if (now - last_accept <= d_min_time_between_reconnect) {
 				if (config::v6) {
 					if (!is_good_ip(from6.sin6_addr)) {
 						close(peer_fd);
@@ -212,7 +210,7 @@ int Server::loop()
 			}
 
 			if (fork() == 0) {
-				close(sock_fd);
+				close(d_sock_fd);
 				if (config::v6) {
 					inet_ntop(AF_INET6, &from6.sin6_addr, dst, sizeof(dst));
 					port = ntohs(from6.sin6_port);
@@ -226,7 +224,7 @@ int Server::loop()
 				msg += dst;
 				syslog().log(msg);
 
-				server_session *s = new (nothrow) server_session(peer_fd, ssl_ctx);
+				server_session *s = new (nothrow) server_session(peer_fd, d_ssl_ctx);
 				if (!s) {
 					syslog().log("out of memory");
 					exit(1);
@@ -244,14 +242,13 @@ int Server::loop()
 		}
 	} else {
 		if (config::local_port.length() > 0)
-			sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
-		sock_fd = sock->connect(config::host, config::port);
-		if (sock_fd < 0) {
-			err = "Server::loop::";
-			err += sock->why();
+			d_sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
+		if ((d_sock_fd = d_sock->connect(config::host, config::port)) < 0) {
+			d_err = "Server::loop::";
+			d_err += d_sock->why();
 			return -1;
 		}
-		server_session *s = new (nothrow) server_session(sock_fd, ssl_ctx);
+		server_session *s = new (nothrow) server_session(d_sock_fd, d_ssl_ctx);
 		if (s)
 			s->handle();
 		delete s;

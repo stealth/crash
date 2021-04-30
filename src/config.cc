@@ -1,10 +1,14 @@
 #include <map>
+#include <cstdint>
 #include <string>
+#include "misc.h"
 
 namespace config
 {
 	bool verbose = 0, silent = 0, v6 = 0, uid_change = 1, wrap = 0,
-	     always_login = 0, extract_blob = 0, rand_traffic = 0, no_hk_check = 0;
+	     always_login = 0, extract_blob = 0, no_hk_check = 0;
+
+	uint32_t traffic_flags = crash::TRAFFIC_PAD1;
 
 	std::string keyfile = "./serverkey.priv", certfile = "./serverkey.pub";
 	std::string host = "", port = "2222", local_port = "";

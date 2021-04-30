@@ -49,26 +49,26 @@ namespace crash {
 
 class Server {
 
-	int sock_fd;
-	Socket *sock;
-	std::string err;
+	int d_sock_fd{-1};
+	Socket *d_sock{nullptr};
+	std::string d_err{""};
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
-	const SSL_METHOD *ssl_method;
+	const SSL_METHOD *d_ssl_method{nullptr};
 #else
-	SSL_METHOD *ssl_method;
+	SSL_METHOD *d_ssl_method{nullptr};
 #endif
-	SSL_CTX *ssl_ctx;
+	SSL_CTX *d_ssl_ctx{nullptr};
 
-	std::map<std::string, time_t> connects;
-	static unsigned short min_time_between_reconnect;
+	std::map<std::string, time_t> d_connects;
+	static unsigned short d_min_time_between_reconnect;
 public:
 
 	Server();
 
 	~Server();
 
-	const char *why() { return err.c_str(); };
+	const char *why() { return d_err.c_str(); };
 
 	int setup();
 

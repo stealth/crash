@@ -73,7 +73,7 @@ namespace crash {
 
 
 // change in client my_major, my_minor accordingly
-string server_session::d_banner = "1000 crashd-2.000 OK\r\n";
+string server_session::d_banner = "1000 crashd-2.001 OK\r\n";
 
 // in non-pty case, get notified about childs exit to close
 // DGRAM sockets which dont return "ready for read" on select()
@@ -546,6 +546,8 @@ int server_session::handle()
 	int max_fd = d_sock, i = 0;
 	bool leave = 0;
 
+	string::size_type last_ssl_qlen = 0;
+
 	for (;!leave && !pipe_child_exited;) {
 
 		errno = 0;
@@ -651,7 +653,12 @@ int server_session::handle()
 
 				if (d_fd2state[i].obuf.size() > 0) {
 
-					pad_nops(d_fd2state[i].obuf);
+					// Only pad if since last padding new payload data was added to queue.
+					// As there is only one socket (d_sock) where we pad outgoing data,
+					// one variable (last_ssl_qlen) is sufficient and we don't need to have
+					// a variable inside d_fd2state.
+					if (last_ssl_qlen < d_fd2state[i].obuf.size())
+						pad_nops(d_fd2state[i].obuf);
 
 					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size());
 					switch (SSL_get_error(d_ssl, n)) {
@@ -668,6 +675,7 @@ int server_session::handle()
 					}
 					if (n > 0)
 						d_fd2state[i].obuf.erase(0, n);
+					last_ssl_qlen = d_fd2state[i].obuf.size();
 				}
 
 				if (revents & (POLLIN|POLLOUT)) {
@@ -830,6 +838,7 @@ int server_session::handle_input(int i)
 			if (d_iob.is_pty())
 				ioctl(d_iob.master1(), TIOCSWINSZ, &ws);
 		}
+	// ping request
 	} else if (cmd.find("C:PP:", 6) == 6) {
 		const string echo = cmd.substr(5 + 6, len - 6);
 		d_fd2state[d_sock].obuf += slen(6 + echo.size());
@@ -841,6 +850,17 @@ int server_session::handle_input(int i)
 		;	// ignore ping replies
 	} else if (cmd.find("C:NO:", 6) == 6) {
 		;	// ignore nops
+
+	// The traffic management options may be triggered by the client, so these will not be
+	// found in crashc.cc
+
+	// disable traffic padding
+	} else if (cmd.find("C:P0:", 6) == 6) {
+		config::traffic_flags |= TRAFFIC_NOPAD;
+	// enable maximum padding
+	} else if (cmd.find("C:P9:", 6) == 6) {
+		config::traffic_flags &= ~TRAFFIC_NOPAD;
+		config::traffic_flags |= TRAFFIC_PADMAX;
 	}
 
 	cmd.erase(0, 5 + len);

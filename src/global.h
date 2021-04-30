@@ -8,6 +8,7 @@
 
 namespace global {
 	extern bool window_size_changed;
+	extern bool input_received;
 	extern pid_t crashd_pid;
 	extern std::map<std::string, unsigned int> good_ips;
 }

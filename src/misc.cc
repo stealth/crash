@@ -44,6 +44,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include "config.h"
 #include "misc.h"
 #include "global.h"
 
@@ -93,27 +94,38 @@ int writen(int fd, const void *buf, size_t len)
 
 void pad_nops(string &s)
 {
+
+	if (config::traffic_flags & TRAFFIC_NOPAD)
+		return;
+
 	const uint8_t nop_fix = 5 + 6;	// %05hu:C:NO:
 
 	const auto l = s.size();
 	int pads = 0;
 
-	if (l + nop_fix >= MTU)
+	// 1420 is most likely the TCP MSS and we substract something for TLS record size
+	enum { PMAX_SIZE = 1420 - 64 };
+
+	if (l + nop_fix >= PMAX_SIZE)
 		return;
 
-	char zeros[MTU] = {0};
+	char zeros[PMAX_SIZE] = {0};
 
-	if (l + nop_fix > 1024)
-		pads = MTU - l - nop_fix;
-	else if (l + nop_fix > 512)
-		pads = 1024 - l - nop_fix;
-	else if (l + nop_fix > 256)
-		pads = 512 - l - nop_fix;
-	else
-		pads = 256 - l - nop_fix;
+	if (config::traffic_flags & TRAFFIC_PADMAX) {
+		pads = PMAX_SIZE - l - nop_fix;
+	} else {
+		if (l + nop_fix > 1024)
+			pads = PMAX_SIZE - l - nop_fix;
+		else if (l + nop_fix > 512)
+			pads = 1024 - l - nop_fix;
+		else if (l + nop_fix > 256)
+			pads = 512 - l - nop_fix;
+		else
+			pads = 256 - l - nop_fix;
+	}
 
 	// Huh?
-	if (pads < 0 || pads > 512)
+	if (pads < 0 || pads > PMAX_SIZE)
 		return;
 
 	s += slen(6 + pads);
@@ -124,7 +136,10 @@ void pad_nops(string &s)
 
 string ping_packet()
 {
-	return "00010:C:PP:ping";
+	if (config::traffic_flags & TRAFFIC_PING_IGN)
+		return "00010:C:PR:ping";	// use a ping-reply which is ignored
+	else
+		return "00010:C:PP:ping";
 }
 
 

@@ -33,7 +33,7 @@ CXX=c++
 INC+=-I$(SSL)/include
 CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC)
 LIBS+=-L$(SSL)/lib
-LD=c++
+LD=$(CXX)
 STRIP=strip
 
 all: crashd crashc
