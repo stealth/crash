@@ -728,7 +728,7 @@ int client_session::handle()
 					case SSL_ERROR_WANT_READ:
 						break;
 					default:
-						d_err = "client_session::handle::SSL_write:";
+						d_err = "client_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						return -1;
 					}
@@ -1040,7 +1040,7 @@ void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c command] [-U lport:[ip]:rport]\n"
-	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R 0-6] <-l user>\n\n"
+	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R level] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
@@ -1055,7 +1055,7 @@ void help(const char *p)
 	       "\t -T -- forward TCP port lport to ip:rport on remote site\n"
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
 	       "\t -5 -- start SOCKS5 server on lport to forward TCP sessions\n"
-	       "\t -R -- traffic blinding policy (default 1)\n"
+	       "\t -R -- traffic blinding level (0-6, default 1)\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
 }

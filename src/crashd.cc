@@ -55,8 +55,8 @@ using namespace crash;
 void help(const char *p)
 {
 	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-H host] [-p port] [-A auth keys]\n"
-	       "\t [-k server key-file] [-c server X509 certificate] [-P port] [-w]\n"
-	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs]\n\n"
+	       "\t [-k server key-file] [-c server X509 certificate] [-P port]\n"
+	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-w]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
 	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"

@@ -700,7 +700,7 @@ int server_session::handle()
 					case SSL_ERROR_WANT_READ:
 						break;
 					default:
-						d_err = "client_session::handle::SSL_write:";
+						d_err = "client_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						return -1;
 					}
