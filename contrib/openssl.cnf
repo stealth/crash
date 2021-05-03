@@ -1,0 +1,45 @@
+HOME			= .
+RANDFILE		= $ENV::HOME/.rnd
+
+
+####################################################################
+[ req ]
+default_bits		= 4096
+default_keyfile 	= privkey.pem
+distinguished_name	= req_distinguished_name
+attributes		= req_attributes
+
+[ req_distinguished_name ]
+countryName			= Country Name (2 letter code)
+countryName_default		= DE
+countryName_min			= 2
+countryName_max			= 2
+
+stateOrProvinceName		= Province
+stateOrProvinceName_default	= JWD
+
+localityName			= City
+localityName_default		= Karl Marx Stadt
+
+0.organizationName		= Organization
+0.organizationName_default	= crash users
+
+organizationalUnitName		= Unit name
+organizationalUnitName_default	= Steelworker
+
+commonName			= Common Name
+commonName_default		= noname
+commonName_max			= 64
+
+emailAddress			= Mail
+emailAddress_default		= nomail
+emailAddress_max		= 64
+
+[ req_attributes ]
+challengePassword		= A challenge password
+challengePassword_min		= 4
+challengePassword_max		= 20
+
+unstructuredName		= An optional company name
+
+

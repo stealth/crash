@@ -36,6 +36,8 @@ LIBS+=-L$(SSL)/lib
 LD=$(CXX)
 STRIP=strip
 
+CNF=../contrib/openssl.cnf
+
 all: crashd crashc
 
 clean:
@@ -50,11 +52,11 @@ keys:
 	@echo
 	@echo "**************************"
 	sleep 3
-	openssl genrsa -out serverkey.priv 4096
-	openssl req -new -x509 -nodes -sha1 -key serverkey.priv -out serverkey.pub
-	openssl x509 -in serverkey.pub -pubkey -noout > HK_127.0.0.1
-	openssl genrsa -out authkey.priv -aes256 4096
-	openssl rsa -in authkey.priv -pubout -out authkey.pub
+	OPENSSL_CONF=$(CNF) openssl genrsa -out serverkey.priv 4096
+	OPENSSL_CONF=$(CNF) openssl req -new -x509 -nodes -sha1 -key serverkey.priv -out serverkey.pub
+	OPENSSL_CONF=$(CNF) openssl x509 -in serverkey.pub -pubkey -noout > HK_127.0.0.1
+	OPENSSL_CONF=$(CNF) openssl genrsa -out authkey.priv -aes256 4096
+	OPENSSL_CONF=$(CNF) openssl rsa -in authkey.priv -pubout -out authkey.pub
 	@echo
 	@echo
 	@echo "Your serverkey is in serverkey.{priv,pub} and authentication (user-) key in"

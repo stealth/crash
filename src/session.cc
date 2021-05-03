@@ -431,7 +431,7 @@ int server_session::handle()
 				close(i);
 		}
 		setsid();
-#if (defined __FreeBSD__) || (defined __NetBSD__)
+#if (defined __FreeBSD__) || (defined __NetBSD__) || (defined __OpenBSD__)
 		if (setlogin(d_user.c_str()) < 0) {
 			d_err = "FAIL: server_session::handle::setlogin:";
 			d_err += strerror(errno);
