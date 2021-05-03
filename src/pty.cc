@@ -122,7 +122,6 @@ int pty::open()
 		return -1;
 	}
 
-	fchmod(_slave, 0600);
 	return 0;
 #endif
 }
@@ -164,8 +163,16 @@ int pty::grant(uid_t u, gid_t g, mode_t mode)
 		serr = strerror(errno);
 		return -1;
 	}
-	mode_t mask = umask(0);
 	if (fchown(_master, u, g) < 0 || fchown(_slave, u, g) < 0) {
+		serr = strerror(errno);
+		return -1;
+	}
+#else
+	if (fchmod(_slave, mode) < 0) {
+		serr = strerror(errno);
+		return -1;
+	}
+	if (fchown(_slave, u, g) < 0) {
 		serr = strerror(errno);
 		return -1;
 	}

@@ -407,21 +407,29 @@ int server_session::handle()
 	memset(&iti, 0, sizeof(iti));
 	setitimer(ITIMER_REAL, &iti, nullptr);
 
-	string l = "SUCCESS: opening session for user '";
-	l += d_user;
-	l += "'";
-	syslog().log(l);
-
-
 	if (d_cmd.size() > 0) {
 		struct sigaction sa;
 		memset(&sa, 0, sizeof(sa));
 		sa.sa_handler = sess_sig_chld;
 		sa.sa_flags = SA_RESTART;
 		sigaction(SIGCHLD, &sa, nullptr);
-		d_iob.init_socket();
-	} else
-		d_iob.init_pty(d_final_uid, -1, 0600);
+		if (d_iob.init_socket() < 0) {
+			d_err = "server_session::handle:: I/O channel setup:";
+			d_err += d_iob.why();
+			return -1;
+		}
+	} else {
+		if (d_iob.init_pty(d_final_uid, -1, 0600) < 0) {
+			d_err = "server_session::handle:: PTY setup:";
+			d_err += d_iob.why();
+			return -1;
+		}
+	}
+
+	string l = "SUCCESS: opening session for user '";
+	l += d_user;
+	l += "'";
+	syslog().log(l);
 
 	// only on a pipe in non-pty mode, unused for other cases
 	if ((pipe_child = fork()) == 0) {
