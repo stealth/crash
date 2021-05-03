@@ -439,7 +439,7 @@ int server_session::handle()
 				close(i);
 		}
 		setsid();
-#if (defined __FreeBSD__) || (defined __NetBSD__) || (defined __OpenBSD__)
+#if (defined __FreeBSD__) || (defined __NetBSD__) || (defined __OpenBSD__) || (defined __APPLE__)
 		if (config::uid_change && setlogin(d_user.c_str()) < 0) {
 			d_err = "FAIL: server_session::handle::setlogin:";
 			d_err += strerror(errno);
