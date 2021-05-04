@@ -333,9 +333,6 @@ connections can survive. Note that due to `-4` and `-U` which allows to proxy TC
 to a remote site, *crash* may be used as a [shadowsocks](https://shadowsocks.org) alternative that requires
 basically no setup and just needs a user-shell behind egress.
 
-As *crash* is using TLS as a transport, theres an automagic benefit as it will not reveal by
-protocol that theres a shell session inside and no HTTPS.
-
 If you think that all of this is paranoia, go get some product sheets for devices that
 detect and classify SSH traffic by behavioral analysis.
 

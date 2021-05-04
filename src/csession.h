@@ -53,7 +53,7 @@ namespace crash {
 
 class client_session {
 
-	int d_sock_fd{-1}, d_peer_fd{-1};
+	int d_sock_fd{-1}, d_peer_fd{-1}, d_max_fd{0};
 	Socket *d_sock{nullptr};
 
 	std::string d_err{""};

@@ -125,6 +125,16 @@ server_session::~server_session()
 	if (d_pubkey)
 		EVP_PKEY_free(d_pubkey);
 	// Do not mess with SSL_CTX, its not owned by us, but by server {}
+
+	if (d_fd2state) {
+		for (int i = 3; i <= d_max_fd; ++i) {
+			if (d_fd2state[i].state != STATE_INVALID)
+				close(i);
+		}
+		delete [] d_fd2state;
+	}
+
+	delete [] d_pfds;
 }
 
 
@@ -407,13 +417,14 @@ int server_session::handle()
 	memset(&iti, 0, sizeof(iti));
 	setitimer(ITIMER_REAL, &iti, nullptr);
 
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = sess_sig_chld;
+	sa.sa_flags = SA_RESTART;
+	sigaction(SIGCHLD, &sa, nullptr);
+
 	if (d_cmd.size() > 0) {
-		struct sigaction sa;
-		memset(&sa, 0, sizeof(sa));
-		sa.sa_handler = sess_sig_chld;
-		sa.sa_flags = SA_RESTART;
-		sigaction(SIGCHLD, &sa, nullptr);
-		if (d_iob.init_socket() < 0) {
+		if (d_iob.init_pipe() < 0) {
 			d_err = "server_session::handle:: I/O channel setup:";
 			d_err += d_iob.why();
 			return -1;
@@ -531,11 +542,11 @@ int server_session::handle()
 	}
 
 	d_pfds[d_iob.master0()].fd = d_iob.master0();
-	d_pfds[d_iob.master0()].events = POLLIN|POLLOUT;
+	d_pfds[d_iob.master0()].events |= POLLOUT;
 	d_pfds[d_iob.master1()].fd = d_iob.master1();
-	d_pfds[d_iob.master1()].events = POLLIN|POLLOUT;
+	d_pfds[d_iob.master1()].events |= POLLIN;
 	d_pfds[d_iob.master2()].fd = d_iob.master2();
-	d_pfds[d_iob.master2()].events = POLLIN|POLLOUT;
+	d_pfds[d_iob.master2()].events |= POLLIN;
 
 	d_pfds[d_sock].fd = d_sock;
 	d_pfds[d_sock].events = POLLIN;
@@ -545,37 +556,39 @@ int server_session::handle()
 	fcntl(d_sock, F_SETFL, flags|O_NONBLOCK);
 	SSL_set_mode(d_ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
 
+	d_max_fd = d_sock;
+
 	// rbuf a bit larger to contain "1234:C:..." prefix and making it more likely
 	// that handle_input() isn't called with incomplete buffer but in a way the first
 	// SSL_read() could contain a complete maximum MTU packet
 	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
 
 	ssize_t r = 0;
-	int max_fd = d_sock, i = 0;
-	bool leave = 0;
+	int i = 0;
 
 	string::size_type last_ssl_qlen = 0;
 
-	for (;!leave && !pipe_child_exited;) {
+	for (;!pipe_child_exited || d_fd2state[d_sock].obuf.size() > 0;) {
 
 		errno = 0;
 
 		for (i = rl.rlim_cur - 1; i > 0; --i) {
 			if (d_fd2state[i].state != STATE_INVALID && d_fd2state[i].fd != -1) {
-				max_fd = i;
+				d_max_fd = i;
 				break;
 			}
 		}
 
-		if ((r = poll(d_pfds, max_fd + 1, 1000)) < 0) {
-			if (pipe_child_exited || errno != EINTR)
-				leave = 1;
+		if ((r = poll(d_pfds, d_max_fd + 1, 1000)) < 0) {
+			if (errno != EINTR) {
+				return -1;
+			}
 			continue;
 		}
 
 		time_t now = time(nullptr);
 
-		for (i = 0; i <= max_fd; ++i) {
+		for (i = 0; i <= d_max_fd; ++i) {
 
 			if (d_fd2state[i].state == STATE_INVALID)
 				continue;
@@ -592,9 +605,8 @@ int server_session::handle()
 
 			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
 
-				if (d_fd2state[i].state == STATE_PTY || d_fd2state[i].state == STATE_SSL) {
-					leave = 1;
-					break;
+				if (d_fd2state[i].state == STATE_SSL) {
+					flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 				}
 
 				if (d_fd2state[i].state == STATE_CONNECTED || d_fd2state[i].state == STATE_CONNECT) {
@@ -604,13 +616,17 @@ int server_session::handle()
 					tcp_nodes2sock.erase(d_fd2state[i].rnode);
 				}
 
-				close(i);
-				d_fd2state[i].fd = -1;
-				d_fd2state[i].state = STATE_INVALID;
-				d_fd2state[i].obuf.clear();
-				d_pfds[i].fd = -1;
-				d_pfds[i].events = 0;
-				continue;
+				// poll() can report hangup on PTY whilst still delivering data from that fd.
+				// do not close in this case but continue the revent treatment
+				if (!(d_fd2state[i].state == STATE_PTY && (d_pfds[i].revents & POLLIN))) {
+					close(i);
+					d_fd2state[i].fd = -1;
+					d_fd2state[i].state = STATE_INVALID;
+					d_fd2state[i].obuf.clear();
+					d_pfds[i].fd = -1;
+					d_pfds[i].events = 0;
+					continue;
+				}
 			}
 
 			if ((d_pfds[i].revents & (POLLIN|POLLOUT)) == 0)
@@ -625,8 +641,8 @@ int server_session::handle()
 				if (revents & POLLIN) {
 					if ((r = read(i, buf, sizeof(buf))) <= 0) {
 						if (errno != EINTR) {
-							leave = 1;
-							break;
+							pipe_child_exited = 1;
+							continue;
 						}
 					} else {
 
@@ -641,10 +657,11 @@ int server_session::handle()
 
 				}
 				if ((revents & POLLOUT) && d_fd2state[i].obuf.size() > 0) {
-					if ((r = write(i, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size())) <= 0) {
-						if (errno != EINTR) {
-							leave = 1;
-							break;
+					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					if ((r = write(i, d_fd2state[i].obuf.c_str(), nw)) <= 0) {
+						if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+							pipe_child_exited = 1;
+							continue;
 						}
 						r = 0;
 					}
@@ -668,9 +685,11 @@ int server_session::handle()
 					if (last_ssl_qlen < d_fd2state[i].obuf.size())
 						pad_nops(d_fd2state[i].obuf);
 
-					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size());
+					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), nw);
 					switch (SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_ZERO_RETURN:
+						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 						return 0;
 					case SSL_ERROR_NONE:
 					case SSL_ERROR_WANT_WRITE:
@@ -679,6 +698,7 @@ int server_session::handle()
 					default:
 						d_err = "server_session::handle::SSL_write:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
+						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 						return -1;
 					}
 					if (n > 0)
@@ -693,6 +713,7 @@ int server_session::handle()
 					case SSL_ERROR_NONE:
 						break;
 					case SSL_ERROR_ZERO_RETURN:
+						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
 						d_pfds[i].events |= POLLOUT;
@@ -702,6 +723,7 @@ int server_session::handle()
 					default:
 						d_err = "client_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
+						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 						return -1;
 					}
 
@@ -824,8 +846,6 @@ int server_session::handle_input(int i)
 
 	if (cmd.size() < 7)
 		return 0;
-
-
 
 	unsigned short l = 0;
 	if (sscanf(cmd.c_str(), "%hu:", &l) != 1)

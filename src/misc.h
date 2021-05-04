@@ -99,6 +99,8 @@ int writen(int fd, const void *buf, size_t len);
 
 int readn(int fd, void *buf, size_t len);
 
+int flush_fd(int, std::string &);
+
 void pad_nops(std::string &);
 
 std::string ping_packet();

@@ -91,9 +91,20 @@ client_session::~client_session()
 		SSL_CTX_free(d_ssl_ctx);
 	*/
 	delete d_sock;
-	close(d_peer_fd);
+
 	if (d_has_tty)
 		tcsetattr(0, TCSANOW, &d_old_tattr);
+
+	if (d_fd2state) {
+		for (int i = 3; i <= d_max_fd; ++i) {
+			if (d_fd2state[i].state != STATE_INVALID)
+				close(i);
+		}
+		delete [] d_fd2state;
+	}
+
+	delete [] d_pfds;
+
 }
 
 
@@ -545,13 +556,15 @@ int client_session::handle()
 	fcntl(d_peer_fd, F_SETFL, flags|O_NONBLOCK);
 	SSL_set_mode(d_ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
 
+	d_max_fd = d_peer_fd;
+
 	// rbuf a bit larger to contain "1234:C:..." prefix and making it more likely
 	// that handle_input() isn't called with incomplete buffer but in a way the first
 	// SSL_read() could contain a complete maximum MTU packet
 	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
 
-	bool has_stdin = 1, leave = 0;
-	int max_fd = d_peer_fd, i = 0, pto = 1000, afd = -1;
+	bool has_stdin = 1;
+	int i = 0, pto = 1000, afd = -1;
 	uint16_t u16 = 0;
 
 	string::size_type last_ssl_qlen = 0;
@@ -563,22 +576,18 @@ int client_session::handle()
 		pto = 20;
 	}
 
+	// First send a ping packet to check for successfull login and process setup
+	d_fd2state[d_peer_fd].obuf += ping_packet();
+	d_pfds[d_peer_fd].events |= POLLOUT;
+
 	// signal padding policy to server; the inject policy is handled by client alone
 	// via different ping types
-	if (config::traffic_flags & TRAFFIC_NOPAD) {
+	if (config::traffic_flags & TRAFFIC_NOPAD)
 		d_fd2state[d_peer_fd].obuf += "00006:C:P0:";
-		d_pfds[d_peer_fd].events |= POLLOUT;
-	} else if (config::traffic_flags & TRAFFIC_PADMAX) {
+	else if (config::traffic_flags & TRAFFIC_PADMAX)
 		d_fd2state[d_peer_fd].obuf += "00006:C:P9:";
-		d_pfds[d_peer_fd].events |= POLLOUT;
-	}
 
-	for (;!leave;) {
-
-		if (has_stdin)
-			d_pfds[0].events = POLLIN;
-		else
-			d_pfds[0].events = 0;
+	for (;has_stdin || d_fd2state[d_peer_fd].obuf.size() > 0;) {
 
 		errno = 0;
 
@@ -587,12 +596,12 @@ int client_session::handle()
 
 		for (i = rl.rlim_cur - 1; i > 0; --i) {
 			if (d_fd2state[i].state != STATE_INVALID && d_fd2state[i].fd != -1) {
-				max_fd = i;
+				d_max_fd = i;
 				break;
 			}
 		}
 
-		if ((r = poll(d_pfds, max_fd + 1, pto)) < 0)
+		if ((r = poll(d_pfds, d_max_fd + 1, pto)) < 0)
 			continue;
 
 		// simulate some typing if configured so
@@ -607,7 +616,7 @@ int client_session::handle()
 
 		time_t now = time(nullptr);
 
-		for (i = 0; i <= max_fd; ++i) {
+		for (i = 0; i <= d_max_fd; ++i) {
 
 			if (d_fd2state[i].state == STATE_INVALID)
 				continue;
@@ -632,8 +641,8 @@ int client_session::handle()
 
 			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
 				if (d_fd2state[i].state == STATE_SSL) {
-					leave = 1;
-					break;
+					flush_fd(1, d_fd2state[1].obuf);
+					return -1;
 				}
 
 				if (d_fd2state[i].state == STATE_CONNECTED || d_fd2state[i].state == STATE_CONNECT) {
@@ -643,13 +652,20 @@ int client_session::handle()
 					tcp_nodes2sock.erase(d_fd2state[i].rnode);
 				}
 
-				close(i);
-				d_fd2state[i].fd = -1;
-				d_fd2state[i].state = STATE_INVALID;
-				d_fd2state[i].obuf.clear();
-				d_pfds[i].fd = -1;
-				d_pfds[i].events = 0;
-				continue;
+				if (d_fd2state[i].state == STATE_STDIN)
+					has_stdin = 0;
+
+				// poll() can report hangup on PTY whilst still delivering data from that fd.
+				// do not close in this case but continue the revent treatment
+				if (!(d_fd2state[i].state == STATE_STDIN && (d_pfds[i].revents & POLLIN))) {
+					close(i);
+					d_fd2state[i].fd = -1;
+					d_fd2state[i].state = STATE_INVALID;
+					d_fd2state[i].obuf.clear();
+					d_pfds[i].fd = -1;
+					d_pfds[i].events = 0;
+					continue;
+				}
 			}
 
 			if ((d_pfds[i].revents & (POLLIN|POLLOUT)) == 0)
@@ -662,12 +678,13 @@ int client_session::handle()
 				if ((r = read(i, buf, sizeof(buf))) <= 0) {
 					if (errno == EINTR)
 						continue;
+					close(i);
+					d_fd2state[i].fd = -1;
+					d_fd2state[i].state = STATE_INVALID;
+					d_pfds[i].fd = -1;
+					d_pfds[i].events = 0;
 					has_stdin = 0;
-					if (r < 0 || d_has_tty)
-						continue;
-
-					r = 1;
-					buf[0] = 0x3;	// emulate Ctrl-C for pipes
+					continue;
 				}
 
 				d_fd2state[d_peer_fd].obuf += slen(6 + r) + ":D:I0:";	// input from 0
@@ -675,7 +692,8 @@ int client_session::handle()
 				d_pfds[d_peer_fd].events |= POLLOUT;
 
 			} else if (d_fd2state[i].state == STATE_STDOUT) {
-				r = write(i, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size());
+				size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+				r = write(i, d_fd2state[i].obuf.c_str(), nw);
 				if (r > 0)
 					d_fd2state[i].obuf.erase(0, r);
 				if (d_fd2state[i].obuf.size() > 0)
@@ -695,9 +713,11 @@ int client_session::handle()
 					if (last_ssl_qlen < d_fd2state[i].obuf.size())
 						pad_nops(d_fd2state[i].obuf);
 
-					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size());
+					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), nw);
 					switch (SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_ZERO_RETURN:
+						flush_fd(1, d_fd2state[1].obuf);
 						return 0;
 					case SSL_ERROR_NONE:
 					case SSL_ERROR_WANT_WRITE:
@@ -706,6 +726,7 @@ int client_session::handle()
 					default:
 						d_err = "client_session::handle::SSL_write:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
+						flush_fd(1, d_fd2state[1].obuf);
 						return -1;
 					}
 					if (n > 0)
@@ -721,6 +742,7 @@ int client_session::handle()
 					case SSL_ERROR_NONE:
 						break;
 					case SSL_ERROR_ZERO_RETURN:
+						flush_fd(1, d_fd2state[1].obuf);
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
 						d_pfds[i].events |= POLLOUT;
@@ -730,6 +752,7 @@ int client_session::handle()
 					default:
 						d_err = "client_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
+						flush_fd(1, d_fd2state[1].obuf);
 						return -1;
 					}
 

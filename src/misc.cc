@@ -92,6 +92,25 @@ int writen(int fd, const void *buf, size_t len)
 }
 
 
+int flush_fd(int fd, string &buf)
+{
+	string::size_type bs = buf.size();
+
+	if (bs == 0)
+		return 0;
+
+	ssize_t n = 0;
+	do {
+		size_t wn = bs > 0x1000 ? 0x1000 : bs;
+		if ((n = write(fd, buf.c_str(), wn)) <= 0)
+			return n;
+		buf.erase(0, n);
+	} while ((bs = buf.size()) > 0);
+
+	return 0;
+}
+
+
 void pad_nops(string &s)
 {
 
