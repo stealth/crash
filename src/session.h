@@ -56,7 +56,7 @@ class server_session {
 
 	std::string d_err{""};
 
-	int d_sock{-1}, d_max_fd{0};
+	int d_sock{-1}, d_max_fd{0}, d_stdin_closed{0};
 	SSL *d_ssl{nullptr};
 	SSL_CTX *d_ssl_ctx{nullptr};
 	EVP_PKEY *d_pubkey{nullptr};

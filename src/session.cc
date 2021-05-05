@@ -564,13 +564,22 @@ int server_session::handle()
 	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
 
 	ssize_t r = 0;
-	int i = 0;
+	int i = 0, poll_to = 1000, stdin_can_close = 1;
 
 	string::size_type last_ssl_qlen = 0;
 
-	for (;!pipe_child_exited || d_fd2state[d_sock].obuf.size() > 0;) {
+	// exit condition checked around poll()
+	for (;;) {
 
-		errno = 0;
+		// if peer has signalled closed stdin, check if we can do so if no data is left to be written to input
+		if (stdin_can_close && d_stdin_closed && d_fd2state[d_iob.master0()].obuf.size() == 0) {
+			d_iob.close_master0();
+			d_fd2state[i].state = STATE_INVALID;
+			d_fd2state[i].obuf.clear();
+			d_pfds[i].fd = -1;
+			d_pfds[i].events = 0;
+			stdin_can_close = 0;
+		}
 
 		for (i = rl.rlim_cur - 1; i > 0; --i) {
 			if (d_fd2state[i].state != STATE_INVALID && d_fd2state[i].fd != -1) {
@@ -579,10 +588,27 @@ int server_session::handle()
 			}
 		}
 
-		if ((r = poll(d_pfds, d_max_fd + 1, 1000)) < 0) {
-			if (errno != EINTR) {
+		errno = 0;
+
+		// faster polls if child already exited and we are just about to flush remaining data
+		if (pipe_child_exited && d_fd2state[d_sock].obuf.size() == 0)
+			poll_to = 0;
+
+		if ((r = poll(d_pfds, d_max_fd + 1, poll_to)) <= 0) {
+
+			// signal caught
+			if (errno == EINTR)
+				continue;
+
+			// child exited and no data left to flush? Thats a clean exit!
+			if (r == 0 && pipe_child_exited && d_fd2state[d_sock].obuf.size() == 0)
+				return 0;
+
+			// real error
+			if (r < 0)
 				return -1;
-			}
+
+			// no fd ready to write, but still data pending. continue
 			continue;
 		}
 
@@ -600,6 +626,7 @@ int server_session::handle()
 				d_fd2state[i].state = STATE_INVALID;
 				d_fd2state[i].obuf.clear();
 				d_pfds[i].fd = -1;
+				d_pfds[i].events = 0;
 				continue;
 			}
 
@@ -657,7 +684,7 @@ int server_session::handle()
 
 				}
 				if ((revents & POLLOUT) && d_fd2state[i].obuf.size() > 0) {
-					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
 					if ((r = write(i, d_fd2state[i].obuf.c_str(), nw)) <= 0) {
 						if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
 							pipe_child_exited = 1;
@@ -685,7 +712,7 @@ int server_session::handle()
 					if (last_ssl_qlen < d_fd2state[i].obuf.size())
 						pad_nops(d_fd2state[i].obuf);
 
-					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
 					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), nw);
 					switch (SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_ZERO_RETURN:
@@ -874,6 +901,10 @@ int server_session::handle_input(int i)
 		d_pfds[d_sock].events |= POLLOUT;
 	} else if (cmd.find("C:T:", 6) == 6 || cmd.find("C:U:", 6) == 6) {
 		net_cmd_handler(cmd, d_fd2state, d_pfds, NETCMD_SEND_ALLOW);
+
+	// remote peer has closed stdin
+	} else if (cmd.find("C:CL:0", 6) == 6) {
+		d_stdin_closed = 1;
 	} else if (cmd.find("C:PR:", 6) == 6) {
 		;	// ignore ping replies
 	} else if (cmd.find("C:NO:", 6) == 6) {

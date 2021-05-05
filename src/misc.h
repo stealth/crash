@@ -43,6 +43,7 @@ namespace crash {
 
 
 enum {
+	CHUNK_SIZE		=	0x1000,
 
 	STATE_INVALID		=	0,
 	STATE_PTY		=	1,

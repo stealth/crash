@@ -464,7 +464,7 @@ int client_session::handle()
 
 	// Now, where passphrase has been typed etc;
 	// setup terminal into raw mode
-	if (d_has_tty)
+	if (d_has_tty && config::cmd.size() == 0)
 		tcsetattr(0, TCSANOW, &d_tattr);
 
 	struct rlimit rl;
@@ -482,6 +482,9 @@ int client_session::handle()
 	d_fd2state[1].fd = 1;
 	d_fd2state[1].state = STATE_STDOUT;
 
+	d_fd2state[2].fd = 2;
+	d_fd2state[2].state = STATE_STDERR;
+
 	d_fd2state[d_peer_fd].fd = d_peer_fd;
 	d_fd2state[d_peer_fd].state = STATE_SSL;
 
@@ -496,6 +499,9 @@ int client_session::handle()
 	d_pfds[0].events = POLLIN;
 	d_pfds[1].fd = 1;
 	d_pfds[1].events = POLLOUT;
+	d_pfds[2].fd = 2;
+	d_pfds[2].events = POLLOUT;
+
 	d_pfds[d_peer_fd].fd = d_peer_fd;
 	d_pfds[d_peer_fd].events = POLLIN;
 
@@ -563,7 +569,6 @@ int client_session::handle()
 	// SSL_read() could contain a complete maximum MTU packet
 	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
 
-	bool has_stdin = 1;
 	int i = 0, pto = 1000, afd = -1;
 	uint16_t u16 = 0;
 
@@ -587,7 +592,9 @@ int client_session::handle()
 	else if (config::traffic_flags & TRAFFIC_PADMAX)
 		d_fd2state[d_peer_fd].obuf += "00006:C:P9:";
 
-	for (;has_stdin || d_fd2state[d_peer_fd].obuf.size() > 0;) {
+	// We loop forever. The one and only exit condition is really when remote peer closed connection,
+	// which we detect by SSL_read()/SSL_write() returns
+	for (;;) {
 
 		errno = 0;
 
@@ -642,6 +649,7 @@ int client_session::handle()
 			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
 				if (d_fd2state[i].state == STATE_SSL) {
 					flush_fd(1, d_fd2state[1].obuf);
+					flush_fd(2, d_fd2state[2].obuf);
 					return -1;
 				}
 
@@ -652,8 +660,12 @@ int client_session::handle()
 					tcp_nodes2sock.erase(d_fd2state[i].rnode);
 				}
 
-				if (d_fd2state[i].state == STATE_STDIN)
-					has_stdin = 0;
+				// (potentially redirected) stdin was closed and no data pending. signal stdin-close to peer
+				if (d_fd2state[i].state == STATE_STDIN && !(d_pfds[i].revents & POLLIN)) {
+					d_pfds[d_peer_fd].events |= POLLOUT;
+					d_fd2state[d_peer_fd].obuf += slen(7);
+					d_fd2state[d_peer_fd].obuf += ":C:CL:0";
+				}
 
 				// poll() can report hangup on PTY whilst still delivering data from that fd.
 				// do not close in this case but continue the revent treatment
@@ -683,7 +695,11 @@ int client_session::handle()
 					d_fd2state[i].state = STATE_INVALID;
 					d_pfds[i].fd = -1;
 					d_pfds[i].events = 0;
-					has_stdin = 0;
+
+					// signal end-of-stdin to peer
+					d_pfds[d_peer_fd].events |= POLLOUT;
+					d_fd2state[d_peer_fd].obuf += slen(7);
+					d_fd2state[d_peer_fd].obuf += ":C:CL:0";
 					continue;
 				}
 
@@ -691,8 +707,8 @@ int client_session::handle()
 				d_fd2state[d_peer_fd].obuf += string(buf, r);
 				d_pfds[d_peer_fd].events |= POLLOUT;
 
-			} else if (d_fd2state[i].state == STATE_STDOUT) {
-				size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+			} else if (d_fd2state[i].state == STATE_STDOUT || d_fd2state[i].state == STATE_STDERR) {
+				size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
 				r = write(i, d_fd2state[i].obuf.c_str(), nw);
 				if (r > 0)
 					d_fd2state[i].obuf.erase(0, r);
@@ -713,11 +729,12 @@ int client_session::handle()
 					if (last_ssl_qlen < d_fd2state[i].obuf.size())
 						pad_nops(d_fd2state[i].obuf);
 
-					size_t nw = d_fd2state[i].obuf.size() > 0x1000 ? 0x1000 : d_fd2state[i].obuf.size();
+					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
 					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), nw);
 					switch (SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_ZERO_RETURN:
 						flush_fd(1, d_fd2state[1].obuf);
+						flush_fd(2, d_fd2state[2].obuf);
 						return 0;
 					case SSL_ERROR_NONE:
 					case SSL_ERROR_WANT_WRITE:
@@ -727,6 +744,7 @@ int client_session::handle()
 						d_err = "client_session::handle::SSL_write:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						flush_fd(1, d_fd2state[1].obuf);
+						flush_fd(2, d_fd2state[2].obuf);
 						return -1;
 					}
 					if (n > 0)
@@ -743,6 +761,7 @@ int client_session::handle()
 						break;
 					case SSL_ERROR_ZERO_RETURN:
 						flush_fd(1, d_fd2state[1].obuf);
+						flush_fd(2, d_fd2state[2].obuf);
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
 						d_pfds[i].events |= POLLOUT;
@@ -753,6 +772,7 @@ int client_session::handle()
 						d_err = "client_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						flush_fd(1, d_fd2state[1].obuf);
+						flush_fd(2, d_fd2state[2].obuf);
 						return -1;
 					}
 

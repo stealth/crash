@@ -216,7 +216,7 @@ int iobox::close_master0()
 	} else {
 		close(d_in[1]);
 		d_in[1] = -1;
-		return -1;
+		return 0;
 	}
 
 	return -1;
