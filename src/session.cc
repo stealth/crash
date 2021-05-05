@@ -83,7 +83,7 @@ volatile bool pipe_child_exited = 0;
 static void sess_sig_chld(int x)
 {
 	pid_t pid;
-	while ((pid = waitpid(-1, nullptr, WNOHANG)) >= 0) {
+	while ((pid = waitpid(-1, nullptr, WNOHANG)) > 0) {
 		// pipe_child PID is local to the session process and refers to the child attatched to the PTY
 		if (pid == pipe_child)
 			pipe_child_exited = 1;
@@ -125,6 +125,8 @@ server_session::~server_session()
 	if (d_pubkey)
 		EVP_PKEY_free(d_pubkey);
 	// Do not mess with SSL_CTX, its not owned by us, but by server {}
+
+	shutdown(d_sock, SHUT_RDWR);
 
 	if (d_fd2state) {
 		for (int i = 3; i <= d_max_fd; ++i) {
@@ -668,7 +670,12 @@ int server_session::handle()
 				if (revents & POLLIN) {
 					if ((r = read(i, buf, sizeof(buf))) <= 0) {
 						if (errno != EINTR) {
-							pipe_child_exited = 1;
+							close(i);
+							d_fd2state[i].fd = -1;
+							d_fd2state[i].state = STATE_INVALID;
+							d_fd2state[i].obuf.clear();
+							d_pfds[i].fd = -1;
+							d_pfds[i].events = 0;
 							continue;
 						}
 					} else {
@@ -686,8 +693,13 @@ int server_session::handle()
 				if ((revents & POLLOUT) && d_fd2state[i].obuf.size() > 0) {
 					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
 					if ((r = write(i, d_fd2state[i].obuf.c_str(), nw)) <= 0) {
-						if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
-							pipe_child_exited = 1;
+						if (errno != EINTR) {
+							close(i);
+							d_fd2state[i].fd = -1;
+							d_fd2state[i].state = STATE_INVALID;
+							d_fd2state[i].obuf.clear();
+							d_pfds[i].fd = -1;
+							d_pfds[i].events = 0;
 							continue;
 						}
 						r = 0;
