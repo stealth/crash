@@ -564,12 +564,9 @@ int client_session::handle()
 
 	d_max_fd = d_peer_fd;
 
-	// rbuf a bit larger to contain "1234:C:..." prefix and making it more likely
-	// that handle_input() isn't called with incomplete buffer but in a way the first
-	// SSL_read() could contain a complete maximum MTU packet
-	char rbuf[MTU + 128] = {0}, sbuf[MTU] = {0}, stdin_buf[MTU] = {0};
+	char rbuf[RBUF_BSIZE] = {0}, sbuf[MTU] = {0}, stdin_buf[STDIN_BSIZE] = {0};
 
-	int i = 0, pto = 1000, afd = -1;
+	int i = 0, pto = 1000, afd = -1, ssl_read_wants_write = 0;
 	uint16_t u16 = 0;
 
 	string::size_type last_ssl_qlen = 0;
@@ -747,11 +744,17 @@ int client_session::handle()
 					}
 					if (n > 0)
 						d_fd2state[i].obuf.erase(0, n);
-					if ((last_ssl_qlen = d_fd2state[i].obuf.size()) > 0)
+					last_ssl_qlen = d_fd2state[i].obuf.size();
+					if (ssl_read_wants_write || last_ssl_qlen > 0)
 						d_pfds[i].events |= POLLOUT;
+
+					if (!(revents & POLLIN) && !ssl_read_wants_write)
+						continue;
 				}
 
 				if (revents & (POLLIN|POLLOUT)) {
+
+					ssl_read_wants_write = 0;
 
 					ssize_t n = SSL_read(d_ssl, rbuf, sizeof(rbuf));
 					switch (SSL_get_error(d_ssl, n)) {
@@ -763,6 +766,7 @@ int client_session::handle()
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
 						d_pfds[i].events |= POLLOUT;
+						ssl_read_wants_write = 1;
 						break;
 					case SSL_ERROR_WANT_READ:
 						break;
@@ -778,7 +782,6 @@ int client_session::handle()
 						d_fd2state[i].ibuf += string(rbuf, n);
 
 					while (handle_input(d_peer_fd) > 0);
-
 				}
 			}
 

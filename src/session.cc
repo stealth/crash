@@ -560,13 +560,10 @@ int server_session::handle()
 
 	d_max_fd = d_sock;
 
-	// rbuf a bit larger to contain "1234:C:..." prefix and making it more likely
-	// that handle_input() isn't called with incomplete buffer but in a way the first
-	// SSL_read() could contain a complete maximum MTU packet
-	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
+	char pty_buf[PTY_BSIZE] = {0}, rbuf[RBUF_BSIZE] = {0}, sbuf[MTU] = {0};
 
 	ssize_t r = 0;
-	int i = 0, poll_to = 1000, stdin_can_close = 1;
+	int i = 0, poll_to = 1000, stdin_can_close = 1, ssl_read_wants_write = 0;
 
 	string::size_type last_ssl_qlen = 0;
 
@@ -668,7 +665,7 @@ int server_session::handle()
 				d_pfds[i].events = POLLIN;
 
 				if (revents & POLLIN) {
-					if ((r = read(i, buf, sizeof(buf))) <= 0) {
+					if ((r = read(i, pty_buf, sizeof(pty_buf))) <= 0) {
 						if (errno != EINTR) {
 							close(i);
 							d_fd2state[i].fd = -1;
@@ -685,10 +682,9 @@ int server_session::handle()
 							d_fd2state[d_sock].obuf += ":D:O1:";	// output from stdout
 						else
 							d_fd2state[d_sock].obuf += ":D:O2:";	// stderr
-						d_fd2state[d_sock].obuf += string(buf, r);
+						d_fd2state[d_sock].obuf += string(pty_buf, r);
 						d_pfds[d_sock].events |= POLLOUT;
 					}
-
 				}
 				if ((revents & POLLOUT) && d_fd2state[i].obuf.size() > 0) {
 					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
@@ -743,9 +739,16 @@ int server_session::handle()
 					if (n > 0)
 						d_fd2state[i].obuf.erase(0, n);
 					last_ssl_qlen = d_fd2state[i].obuf.size();
+					if (ssl_read_wants_write || last_ssl_qlen > 0)
+						d_pfds[i].events |= POLLOUT;
+
+					if (!(revents & POLLIN) && !ssl_read_wants_write)
+						continue;
 				}
 
 				if (revents & (POLLIN|POLLOUT)) {
+
+					ssl_read_wants_write = 0;
 
 					ssize_t n = SSL_read(d_ssl, rbuf, sizeof(rbuf));
 					switch (SSL_get_error(d_ssl, n)) {
@@ -756,11 +759,12 @@ int server_session::handle()
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
 						d_pfds[i].events |= POLLOUT;
+						ssl_read_wants_write = 1;
 						break;
 					case SSL_ERROR_WANT_READ:
 						break;
 					default:
-						d_err = "client_session::handle::SSL_read:";
+						d_err = "server_session::handle::SSL_read:";
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
 						return -1;
@@ -771,9 +775,6 @@ int server_session::handle()
 
 					while (handle_input(i) > 0);
 				}
-
-				if (d_fd2state[i].obuf.size() > 0)
-					d_pfds[i].events |= POLLOUT;
 			}
 
 			if (d_fd2state[i].state < STATE_ACCEPT)
