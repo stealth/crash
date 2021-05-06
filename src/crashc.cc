@@ -567,7 +567,7 @@ int client_session::handle()
 	// rbuf a bit larger to contain "1234:C:..." prefix and making it more likely
 	// that handle_input() isn't called with incomplete buffer but in a way the first
 	// SSL_read() could contain a complete maximum MTU packet
-	char buf[MTU] = {0}, rbuf[MTU + 128] = {0}, sbuf[MTU] = {0};
+	char rbuf[MTU + 128] = {0}, sbuf[MTU] = {0}, stdin_buf[MTU] = {0};
 
 	int i = 0, pto = 1000, afd = -1;
 	uint16_t u16 = 0;
@@ -582,7 +582,7 @@ int client_session::handle()
 	}
 
 	// First send a ping packet to check for successfull login and process setup
-	d_fd2state[d_peer_fd].obuf += ping_packet();
+	d_fd2state[d_peer_fd].obuf += "00010:C:PP:ping";
 	d_pfds[d_peer_fd].events |= POLLOUT;
 
 	// signal padding policy to server; the inject policy is handled by client alone
@@ -663,8 +663,7 @@ int client_session::handle()
 				// (potentially redirected) stdin was closed and no data pending. signal stdin-close to peer
 				if (d_fd2state[i].state == STATE_STDIN && !(d_pfds[i].revents & POLLIN)) {
 					d_pfds[d_peer_fd].events |= POLLOUT;
-					d_fd2state[d_peer_fd].obuf += slen(7);
-					d_fd2state[d_peer_fd].obuf += ":C:CL:0";
+					d_fd2state[d_peer_fd].obuf += slen(7) + ":C:CL:0";
 				}
 
 				// poll() can report hangup on PTY whilst still delivering data from that fd.
@@ -687,7 +686,7 @@ int client_session::handle()
 			d_pfds[i].revents = 0;
 
 			if (d_fd2state[i].state == STATE_STDIN) {
-				if ((r = read(i, buf, sizeof(buf))) <= 0) {
+				if ((r = read(i, stdin_buf, sizeof(stdin_buf))) <= 0) {
 					if (errno == EINTR)
 						continue;
 					close(i);
@@ -698,13 +697,12 @@ int client_session::handle()
 
 					// signal end-of-stdin to peer
 					d_pfds[d_peer_fd].events |= POLLOUT;
-					d_fd2state[d_peer_fd].obuf += slen(7);
-					d_fd2state[d_peer_fd].obuf += ":C:CL:0";
+					d_fd2state[d_peer_fd].obuf += slen(7) + ":C:CL:0";
 					continue;
 				}
 
 				d_fd2state[d_peer_fd].obuf += slen(6 + r) + ":D:I0:";	// input from 0
-				d_fd2state[d_peer_fd].obuf += string(buf, r);
+				d_fd2state[d_peer_fd].obuf += string(stdin_buf, r);
 				d_pfds[d_peer_fd].events |= POLLOUT;
 
 			} else if (d_fd2state[i].state == STATE_STDOUT || d_fd2state[i].state == STATE_STDERR) {

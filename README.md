@@ -336,6 +336,26 @@ basically no setup and just needs a user-shell behind egress.
 If you think that all of this is paranoia, go get some product sheets for devices that
 detect and classify SSH traffic by behavioral analysis.
 
+File xfers
+----------
+
+Although there is nothing like `sftp` for *crash*, it may be used for file up/downloads.
+
+In order to upload a file:
+```
+~ $ crashc -H host -i authkey.priv -l root -c 'dd of=/path/on/remote status=progress' < local.file
+```
+
+Or to download a file:
+```
+~ $ crashc -H host -i authkey.priv -l root -c 'dd if=/path/on/remote status=progress' > local.file
+```
+
+Note that in the download case you must not specify the `-v` switch since this would add
+the verbose output to the `local.file`. For `-c` commands, *crash* will forward `stdout` and
+`stderr` separated to the local tty's fd 1 and 2, so above commands add a nice progress bar
+during the xfer.
+
 
 cross-build for speedport/fritzbox DSL routers
 ----------------------------------------------
