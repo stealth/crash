@@ -51,7 +51,7 @@ class Server {
 
 	int d_sock_fd{-1};
 	Socket *d_sock{nullptr};
-	std::string d_err{""};
+	std::string d_sni{""}, d_err{""};
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
 	const SSL_METHOD *d_ssl_method{nullptr};
@@ -64,7 +64,7 @@ class Server {
 	static unsigned short d_min_time_between_reconnect;
 public:
 
-	Server();
+	Server(const std::string &);
 
 	~Server();
 

@@ -70,7 +70,8 @@ string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!3DES:!ADH:kDHE:RSA
 extern int enable_dh(SSL_CTX *);
 
 
-Server::Server()
+Server::Server(const std::string &sni)
+	: d_sni(sni)
 {
 }
 
@@ -224,7 +225,7 @@ int Server::loop()
 				msg += dst;
 				syslog().log(msg);
 
-				server_session *s = new (nothrow) server_session(peer_fd, d_ssl_ctx);
+				server_session *s = new (nothrow) server_session(peer_fd, d_ssl_ctx, d_sni);
 				if (!s) {
 					syslog().log("out of memory");
 					exit(1);
@@ -248,7 +249,7 @@ int Server::loop()
 			d_err += d_sock->why();
 			return -1;
 		}
-		server_session *s = new (nothrow) server_session(d_sock_fd, d_ssl_ctx);
+		server_session *s = new (nothrow) server_session(d_sock_fd, d_ssl_ctx, d_sni);
 		if (s)
 			s->handle();
 		delete s;

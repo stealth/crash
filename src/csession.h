@@ -57,7 +57,7 @@ class client_session {
 	Socket *d_sock{nullptr};
 
 	std::string d_err{""};
-	std::string d_sbanner{""};
+	std::string d_sni{""}, d_sbanner{""};
 	SSL_CTX *d_ssl_ctx{nullptr};
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
@@ -75,7 +75,7 @@ class client_session {
 
 	struct termios d_tattr, d_old_tattr;
 
-	uint16_t d_major{2}, d_minor{1};
+	uint16_t d_major{2}, d_minor{2};
 
 	bool d_has_tty{0};
 
@@ -91,7 +91,8 @@ protected:
 
 public:
 
-	client_session()
+	client_session(const std::string &sni)
+	 : d_sni(sni)
 	{
 	}
 

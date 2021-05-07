@@ -52,7 +52,7 @@ namespace crash {
 
 class server_session {
 
-	static std::string d_banner;
+	static std::string d_banner, d_sni;
 
 	std::string d_err{""};
 
@@ -81,7 +81,7 @@ protected:
 
 public:
 
-	server_session(int, SSL_CTX *);
+	server_session(int, SSL_CTX *, const std::string &);
 
 	~server_session();
 

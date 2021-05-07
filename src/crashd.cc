@@ -55,7 +55,7 @@ using namespace crash;
 void help(const char *p)
 {
 	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-H host] [-p port] [-A auth keys]\n"
-	       "\t [-k server key-file] [-c server X509 certificate] [-P port]\n"
+	       "\t [-k server key-file] [-c server X509 certificate] [-P port] [-S SNI]\n"
 	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-w]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
@@ -74,7 +74,8 @@ void help(const char *p)
 	       "\t -c -- X509 certificate-file that belongs to serverkey (-k);\n"
 	       "\t       default is %s\n"
 	       "\t -t -- watch triggerfile for certain message (-m) before connect/listen\n"
-	       "\t -m -- wait with connect/listen until message in file (-t) is seen\n\n",
+	       "\t -m -- wait with connect/listen until message in file (-t) is seen\n"
+	       "\t -S -- SNI to hide behind\n\n",
 	       p, config::port.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
 	       config::certfile.c_str());
 }
@@ -156,7 +157,7 @@ int main(int argc, char **argv)
 
 	printf("\ncrypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
-	while ((c = getopt(argc, argv, "6qH:p:A:t:m:k:c:P:g:Uwea")) != -1) {
+	while ((c = getopt(argc, argv, "6qH:p:A:t:m:k:c:P:g:UweaS:")) != -1) {
 		switch (c) {
 		case 'U':
 			config::uid_change = 0;
@@ -205,6 +206,9 @@ int main(int argc, char **argv)
 			break;
 		case 'e':
 			config::extract_blob = 1;
+			break;
+		case 'S':
+			config::sni = optarg;
 			break;
 		default:
 			help(*orig_argv);
@@ -269,7 +273,7 @@ int main(int argc, char **argv)
 			config::user_keys = config::keyfile;
 	}
 
-	Server *s = new (nothrow) Server;
+	Server *s = new (nothrow) Server(config::sni);
 	if (!s)
 		return 1;
 

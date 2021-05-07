@@ -72,8 +72,10 @@ using namespace std;
 namespace crash {
 
 
-// change in client my_major, my_minor accordingly
-string server_session::d_banner = "1000 crashd-2.001 OK\r\n";
+// change in client d_major, d_minor accordingly
+string server_session::d_banner = "1000 crashd-2.002 OK\r\n";
+
+string server_session::d_sni = "";
 
 // in non-pty case, get notified about childs exit to close
 // DGRAM sockets which dont return "ready for read" on select()
@@ -91,7 +93,7 @@ static void sess_sig_chld(int x)
 }
 
 
-server_session::server_session(int fd, SSL_CTX *ctx)
+server_session::server_session(int fd, SSL_CTX *ctx, const string &sni)
 	: d_sock(fd), d_ssl_ctx(ctx)
 {
 	struct sockaddr_in sin4;
@@ -111,6 +113,11 @@ server_session::server_session(int fd, SSL_CTX *ctx)
 		inet_ntop(AF_INET6, &sin6.sin6_addr, d_peer_ip, sizeof(d_peer_ip));
 	} else {
 		inet_ntop(AF_INET, &sin4.sin_addr, d_peer_ip, sizeof(d_peer_ip));
+	}
+
+	if (sni.size()) {
+		d_sni = sni;
+		d_banner = sni;
 	}
 }
 
@@ -372,10 +379,14 @@ int server_session::handle()
 	iti.it_value.tv_sec = 12;
 	setitimer(ITIMER_REAL, &iti, nullptr);
 
-	if (writen(d_sock, d_banner.c_str(), d_banner.length()) != (int)(d_banner.length())) {
-		d_err = "server_session::handle::writen:";
-		d_err += strerror(errno);
-		return -1;
+	// If a SNI is set, we immediately accept TLS traffic w/o banner and the d_banner
+	// is set to the SNI for Verify()
+	if (!d_sni.size()) {
+		if (writen(d_sock, d_banner.c_str(), d_banner.length()) != (int)(d_banner.length())) {
+			d_err = "server_session::handle::writen:";
+			d_err += strerror(errno);
+			return -1;
+		}
 	}
 
 	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr) {
@@ -390,6 +401,14 @@ int server_session::handle()
 		d_err = "server_session::handle::SSL_accept:";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
+	}
+
+	if (d_sni.size()) {
+		string peer_sni = SSL_get_servername(d_ssl, TLSEXT_NAMETYPE_host_name);
+		if (d_sni != peer_sni) {
+			d_err = "server_session: Wrong SNI by client. Rejecting.";
+			return -1;
+		}
 	}
 
 	// Get our own X509 for authentication input. This has moved below

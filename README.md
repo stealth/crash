@@ -29,7 +29,7 @@ An SSH alternative featuring:
 * supports Perfect Forward Secrecy via DH Kex
 * can forward TCP *and* UDP sockets to remote
 * SOCKS4 and SOCKS5 support to forward browser sessions to remote
-
+* SNI hiding mode
 
 Build
 -----
@@ -83,7 +83,7 @@ crypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash
 ./crashd: invalid option -- 'h'
 
 Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
-	 [-k server key-file] [-c server X509 certificate] [-P port]
+	 [-k server key-file] [-c server X509 certificate] [-P port] [-S SNI]
 	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs]
 
 	 -a -- always login if authenticated, despite false/nologin shells
@@ -104,6 +104,7 @@ Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
 	       default is ./serverkey.pub
 	 -t -- watch triggerfile for certain message (-m) before connect/listen
 	 -m -- wait with connect/listen until message in file (-t) is seen
+         -S -- SNI to hide behind
 ```
 
 Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
@@ -113,7 +114,8 @@ Both, *crashc* and *crashd* can use active and passive connects. Whenever
 a host-argument `-H` is given, it uses active connect to this host
 and the belonging port `-p`. If `-H` is given, it also accepts
 `-P` which specifies the local port it has to bind to before doing active connect.
-Without `-H` it will listen for incoming connects.
+Without `-H` it will listen for incoming connects. This way, from TCP view client
+and server role may be reversed, while still having `crashd` as the shell server.
 If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons. As `-w` is overwriting main()'s `argv` array,
 it must appear last in the option list, otherwise option processing will not work
@@ -194,9 +196,16 @@ Hostkeys
 --------
 
 By default, *crashc* will compare server hostkeys to the local key cache
-that is found inside `~/.crash`. You may override the path of the cache folder
-or an absolute filename by using the `-K` switch. Hostkey checking may be
-suppressed by using `-K none`.
+that is found inside the `.crash/` subdir of CWD. You may override the path of the cache
+folder by using the `-K` switch. For example by using `-K ~/.crash/`, you use the folder
+inside your home directory. If the pathname does not end with a slash, it is treated as
+a filename instead of a directory. If a cache directory is used instead of an
+filename, each hostkey is expected to be found inside the folder as of the name `HK_$HOST:$PORT`
+where `$HOST` is the `-H` argument and `$PORT` the `-p` argument. If using `-v`
+the server hostkey will be printed on stdout and may be pasted to the cache folder
+into the `HK_$HOST:$PORT` file.
+
+Hostkey checking may be suppressed by using `-K none`.
 
 The crash auth protocol incorporates the server host key when signing authentication
 requests. This way its not strictly necessary to check server host keys as
@@ -336,8 +345,24 @@ basically no setup and just needs a user-shell behind egress.
 If you think that all of this is paranoia, go get some product sheets for devices that
 detect and classify SSH traffic by behavioral analysis.
 
-File xfers
-----------
+
+Hiding by SNI
+-------------
+
+By default, the `crashd` whill show a banner upon connect to tell the peer major and minor version
+numbers. Censorship countries might block addresses wich show banners they dislike. To combat this,
+*crash* allows for a TLS-only mode that is indistinguishable from a HTTPS session. Just start
+`crashd` with `-S` and give a semi-secret name (Server Name Indicator, SNI). Only clients that also
+use the correct `-S` parameter will reach the gate for authentication at all. Other TLS sessions
+will just be rejected. *Note that the SNI travels the network in plain-text and that `-S` is not meant
+for authentication.* The only reason for SNI hiding is to hide the *crash* banner from probing/crawling.
+You may also use SNI proxies such as [sshttp](https://github.com/stealth/sshttp) to hide *crash* even
+deeper and to forward all non-correct SNI connects to some web-site. This way you may hide your server
+behind neutral web-sites from agressively probing/blocking censors.
+
+
+File up/download
+----------------
 
 Although there is nothing like `sftp` for *crash*, it may be used for file up/downloads.
 

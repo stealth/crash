@@ -158,6 +158,9 @@ int client_session::setup()
 		return -1;
 	}
 
+	if (d_sni.size())
+		SSL_set_tlsext_host_name(d_ssl, d_sni.c_str());
+
 	FILE *fstream = fopen(config::user_keys.c_str(), "r");
 	if (!fstream) {
 		d_err = "client_session::authenticate::fopen:";
@@ -414,35 +417,46 @@ int client_session::authenticate()
 
 int client_session::handle()
 {
-	char rbanner[1024] = {0};
 
-	FILE *fstream = fdopen(d_peer_fd, "r+");
-	if (!fstream) {
-		d_err = "client_session::handle::fdopen:";
-		d_err += strerror(errno);
-		return -1;
+	// If a SNI is given, we use the SNI string as banner for Sign()
+	if (!d_sni.size()) {
+		char rbanner[1024] = {0};
+
+		FILE *fstream = fdopen(d_peer_fd, "r+");
+		if (!fstream) {
+			d_err = "client_session::handle::fdopen:";
+			d_err += strerror(errno);
+			return -1;
+		}
+
+		setbuffer(fstream, nullptr, 0);
+
+		fgets(rbanner, sizeof(rbanner) - 1, fstream);
+
+		// no fclose()
+
+		d_sbanner = rbanner;
+
+		uint16_t major = 0, minor = 0;
+		if (sscanf(rbanner, "1000 crashd-%hu.%hu OK\r\n", &major, &minor) != 2) {
+			d_err = "client_session::handle:: Invalid remote banner string.";
+			return -1;
+		}
+
+		if (config::verbose) {
+			if ((major != d_major || minor != d_minor))
+				printf("crashc: Different versions. Some features might not work.\n");
+			else
+				printf("crashc: Major/Minor versions match (%hu/%hu)\n", major, minor);
+		}
+	} else {
+		d_sbanner = d_sni;
+
+		if (config::verbose)
+			printf("crashc: Using SNI instead of banner. No major/minor version check.\n");
 	}
 
-	setbuffer(fstream, nullptr, 0);
 	SSL_set_fd(d_ssl, d_peer_fd);
-
-	fgets(rbanner, sizeof(rbanner) - 1, fstream);
-
-	d_sbanner = rbanner;
-
-	uint16_t major = 0, minor = 0;
-	if (sscanf(rbanner, "1000 crashd-%hu.%hu OK\r\n", &major, &minor) != 2) {
-		d_err = "client_session::handle:: Invalid remote banner string.";
-		return -1;
-	}
-
-	if (config::verbose) {
-		if ((major != d_major || minor != d_minor))
-			printf("crashc: Different versions. Some features might not work.\n");
-		else
-			printf("crashc: Major/Minor versions match (%hu/%hu)\n", major, minor);
-	}
-
 	if (SSL_connect(d_ssl) <= 0) {
 		d_err = "client_session::handle::SSL_connect:";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
@@ -1083,7 +1097,7 @@ using namespace crash;
 void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
-	       "\t [-K server key/s] [-c command] [-U lport:[ip]:rport]\n"
+	       "\t [-K server key/s] [-c command] [-S SNI] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R level] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
@@ -1100,6 +1114,7 @@ void help(const char *p)
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
 	       "\t -5 -- start SOCKS5 server on lport to forward TCP sessions\n"
 	       "\t -R -- traffic blinding level (0-6, default 1)\n"
+	       "\t -S -- SNI to use\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
 }
@@ -1120,7 +1135,7 @@ int main(int argc, char **argv)
 	int c = 0, traffic_policy = 1;
 	char lport[16] = {0}, ip[128] = {0}, rport[16] = {0};
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:l:i:c:R:T:U:5:4:")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:P:l:i:c:R:T:U:5:4:S:")) != -1) {
 		switch (c) {
 		case '6':
 			config::v6 = 1;
@@ -1178,6 +1193,9 @@ int main(int argc, char **argv)
 					ostr += "crashc: set up SOCKS5 port on " + string(optarg) + "\n";
 			}
 			break;
+		case 'S':
+			config::sni = optarg;
+			break;
 		default:
 			help(*argv);
 			return 0;
@@ -1228,7 +1246,7 @@ int main(int argc, char **argv)
 		printf("crashc: starting crypted administration shell\ncrashc: connecting to %s:%s ...\n\n",
 		       config::host.c_str(), config::port.c_str());
 	}
-	client_session csess;
+	client_session csess(config::sni);
 	if (csess.setup() < 0) {
 		fprintf(stderr, "crashc: %s\n", csess.why());
 		return 1;
