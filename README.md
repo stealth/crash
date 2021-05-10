@@ -136,7 +136,7 @@ src $ ./crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER
 Key setup
 ---------
 
-The easiest way is to just
+Unless you want to use SNI-hiding (see section below), you can type straight ahead:
 
 ```
 $ make -C src keys
@@ -162,10 +162,10 @@ extract the pubkey. But note that this might already be a key presented to
 you during an attack. So only do that if you know that the connection is
 not tampered with (e.g. single user on localhost).
 
-The values you enter for *Country-Name, Email, CN* etc. do not matter
-since *crashc* is not validating the X509. It just compares the public
-key value it obtained from the server with the key it has in its local
-key-store belonging to that server (similar to *SSH*).
+Unless you use SNI hiding (see section below), the values you enter for *Country-Name,
+Email, CN* etc. do not matter since *crashc* is not validating the X509. It just
+compares the public key value it obtained from the server with the key it has in its
+local key-store belonging to that server (similar to *SSH*).
 The server key is not encrypted since *crashd* is usually started
 via init scripts. Instead, the key file must have proper permissions
 so only appropriate users can read it (mode 0600). You can, if you like,
@@ -359,6 +359,11 @@ for authentication.* The only reason for SNI hiding is to hide the *crash* banne
 You may also use SNI proxies such as [sshttp](https://github.com/stealth/sshttp) to hide *crash* even
 deeper and to forward all non-correct SNI connects to some web-site. This way you may hide your server
 behind neutral web-sites from agressively probing/blocking censors.
+
+In order for probing to not reveal that you are running *crash* by checking the X509 certificate
+details, you should use reasonable values for *Country Name*, *City* etc. when asked for it during
+the `make keys` process. For instance it would make no sense to setup a pro-regime web-site
+to hide behind and enter anti-regime values for the X509 specific namings.
 
 
 File up/download
