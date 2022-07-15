@@ -1,5 +1,20 @@
 #!/usr/bin/perl
 
+# set path if a different openssl binary (e.g. openssl3) should be used
+my $openssl = "openssl";
+
 print "Generating 2048 bit DH parameters ...\n\n";
-system("openssl dhparam -5 -noout -C 2048 > dh2048.cc");
+
+my $version = `$openssl version`;
+
+if ($version =~ /OpenSSL 3\./) {
+	unlink("dh2048.cc");
+	open(O,">>dh2048.cc") or die $!;
+	print O "#include <string>\n\nstd::string pem_dh = R\"(\n";
+	system("$openssl dhparam -5 -outform pem 2048 >> dh2048.cc");
+	print O "\n)\";\n";
+	close O;
+} else {
+	system("$openssl dhparam -5 -noout -C 2048 > dh2048.cc");
+}
 

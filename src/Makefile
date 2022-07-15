@@ -11,11 +11,11 @@ LIBS=../openssl/libssl.a ../openssl/libcrypto.a -lutil
 STRIP=$(CROSS_COMPILE)strip
 else
 
-#SSL=/opt/ssl/openssl-1.1.1
+#SSL=/opt/ssl/openssl-3.0.0
 INC=
 
 ifeq ($(shell uname), Linux)
-	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib
+	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib -Wl,--rpath=$(SSL)/lib64
 	CFLAGS+=-DHAVE_UNIX98
 else ifeq ($(shell uname), Solaris)
 	LIBS+=-lssl -lcrypto -lsocket -lnsl
@@ -32,7 +32,7 @@ endif
 CXX=c++
 INC+=-I$(SSL)/include
 CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC)
-LIBS+=-L$(SSL)/lib
+LIBS+=-L$(SSL)/lib -L$(SSL)/lib64
 LD=$(CXX)
 STRIP=strip
 

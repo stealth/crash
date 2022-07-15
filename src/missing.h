@@ -11,6 +11,9 @@ extern "C" {
 #define EVP_MD_CTX_delete EVP_MD_CTX_destroy
 #endif
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#define EVP_PKEY_cmp EVP_PKEY_eq
 #endif
 
+#endif
 
