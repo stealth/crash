@@ -67,6 +67,14 @@ $ cd src; ./newdh
 
 before `make` in order to generate DH parameters before the build.
 
+OpenSSL3 builds
+---------------
+
+The *OpenSSL 3* API is quite different from the *OpenSSL-1.0* and 1.1 API. In order to make
+use of *OpenSSL 3*, you have to edit `Makefile` and `newdh` to reflect your path setup
+for your *OpenSSL* install. Invoking `newdh` is mandatory, unlike for the 1.x builds. After
+that you just do `make` and everything should be the same as with 1.x.
+
 
 Run
 ---
