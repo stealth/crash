@@ -177,7 +177,8 @@ void read_until(const char *path, const char *msg)
 	char buf[1024];
 	for (;;) {
 		memset(buf, 0, sizeof(buf));
-		fgets(buf, sizeof(buf), f);
+		if (!fgets(buf, sizeof(buf), f))
+			;	// avoid gcc warning
 		if (strstr(buf, msg))
 			break;
 		sleep(3);
@@ -235,7 +236,8 @@ string extract_keys(const char *blob)
 		return "";
 	}
 
-	write(fd, data + i, st.st_size - i);
+	if (write(fd, data + i, st.st_size - i) < 0)
+		;	// avoid gcc warning
 	close(fd);
 	delete [] data;
 	return string(tfile);

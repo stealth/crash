@@ -109,7 +109,7 @@ void logger::login(const string &dev, const string &user, const string &host)
 
 	snprintf(utx.ut_line, sizeof(utx.ut_line), "%s", ptr);
 	snprintf(utx.ut_user, sizeof(utx.ut_user), "%s", user.c_str());
-	snprintf(utx.ut_id, sizeof(utx.ut_id), "%04x", utx.ut_pid);
+	snprintf(utx.ut_id, sizeof(utx.ut_id), "%03x", utx.ut_pid);
 
 	timeval tv;
 	gettimeofday(&tv, nullptr);

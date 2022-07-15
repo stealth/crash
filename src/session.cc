@@ -288,7 +288,8 @@ int server_session::authenticate()
 		d_err = "server_session::authenticate: Invalid username.";
 	} else {
 		d_shell = pwp->pw_shell;
-		chdir(pwp->pw_dir);
+		if (chdir(pwp->pw_dir) < 0)
+			;	// avoid gcc warning
 		d_home = pwp->pw_dir;
 
 		if (config::uid_change && setgid(pwp->pw_gid) < 0) {
@@ -340,8 +341,10 @@ int server_session::authenticate()
 		}
 
 		// Ok? see above comment. Will drop that later completely to "final_uid".
-		if (config::uid_change)
-			setreuid(0, 0);
+		if (config::uid_change) {
+			if (setreuid(0, 0) < 0)
+				;	// avoid gcc warning
+		}
 
 		if (EVP_VerifyInit_ex(md_ctx.get(), sha512, nullptr) != 1)
 			return -1;
