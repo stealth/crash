@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2021 Sebastian Krahmer.
+ * Copyright (C) 2006-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,21 +46,26 @@ namespace crash {
 
 class Socket {
 protected:
-	int sock_fd, family;
-	std::string error;
+	int d_sock_fd{-1}, d_family{PF_INET}, d_type{SOCK_STREAM};
+	std::string d_error{""};
+
+	void create(int, int);
 
 public:
 
-	Socket(int);
+	Socket(int, int);
 
 	virtual ~Socket();
+
+	int recycle();
 
 	int connect(const std::string &, const std::string &);
 
 	int blisten(unsigned short port, bool do_listen = 1);
 
-	const char *why() { return error.c_str(); };
+	bool is_good() { return d_sock_fd >= 0; };
 
+	const char *why() { return d_error.c_str(); };
 };
 
 
@@ -71,7 +76,10 @@ int tcp_listen(const std::string &, const std::string &);
 
 int udp_listen(const std::string &, const std::string &);
 
-int net_cmd_handler(const std::string &, state *, pollfd *, uint32_t flags = 0);
+int tcp_connect(const std::string &, const std::string &);
+
+int udp_connect(const std::string &, const std::string &);
+
 
 struct alignas(4) v4_tuple {
 	in_addr dst;

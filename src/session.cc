@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Sebastian Krahmer.
+ * Copyright (C) 2009-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,110 +30,57 @@
  * SUCH DAMAGE.
  */
 
-#include <cstdio>
+#include <map>
 #include <string>
-#include <cstring>
-#include <ctype.h>
-#include <memory>
-#include <errno.h>
-#include <pwd.h>
-#include <grp.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <signal.h>
-#include <poll.h>
-#include <termios.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/ioctl.h>
+#include <cstdint>
+#include <cstdio>
 #include <sys/socket.h>
-#include <arpa/inet.h>
+#include <sys/types.h>
+
 extern "C" {
+#include <openssl/opensslv.h>
 #include <openssl/ssl.h>
-#include <openssl/rand.h>
-#include <openssl/err.h>
+#include <openssl/evp.h>
 }
-#include <iostream>
-#include "config.h"
-#include "global.h"
-#include "session.h"
-#include "misc.h"
-#include "pty.h"
-#include "log.h"
+
 #include "net.h"
-#include "deleters.h"
-#include "missing.h"
+#include "config.h"
+#include "session.h"
 
-
-using namespace std;
 
 namespace crash {
 
 
-// change in client d_major, d_minor accordingly
-string server_session::d_banner = "1000 crashd-2.002 OK\r\n";
-
-string server_session::d_sni = "";
-
-// in non-pty case, get notified about childs exit to close
-// DGRAM sockets which dont return "ready for read" on select()
-volatile pid_t pipe_child = 1;
-volatile bool pipe_child_exited = 0;
-
-static void sess_sig_chld(int x)
+session::session(const string &t, const string &sni)
+	: d_transport(t), d_sni(sni)
 {
-	pid_t pid;
-	while ((pid = waitpid(-1, nullptr, WNOHANG)) > 0) {
-		// pipe_child PID is local to the session process and refers to the child attatched to the PTY
-		if (pid == pipe_child)
-			pipe_child_exited = 1;
+	if (d_transport == "dtls1") {
+		d_type = SOCK_DGRAM;
+		d_chunk_size = UDP_CHUNK_SIZE;
+		d_poll_to.max = d_poll_to.next = UDP_POLL_TO;
 	}
+	d_now = time(nullptr);
 }
 
 
-server_session::server_session(int fd, SSL_CTX *ctx, const string &sni)
-	: d_sock(fd), d_ssl_ctx(ctx)
-{
-	struct sockaddr_in sin4;
-	struct sockaddr_in6 sin6;
-	socklen_t slen = sizeof(struct sockaddr_in);
-	struct sockaddr *sin = reinterpret_cast<struct sockaddr *>(&sin4);
-
-	if (config::v6) {
-		slen = sizeof(struct sockaddr_in6);
-		sin = reinterpret_cast<struct sockaddr *>(&sin6);
-	}
-
-	if (getpeername(fd, sin, &slen) < 0)
-		return;
-
-	if (config::v6) {
-		inet_ntop(AF_INET6, &sin6.sin6_addr, d_peer_ip, sizeof(d_peer_ip));
-	} else {
-		inet_ntop(AF_INET, &sin4.sin_addr, d_peer_ip, sizeof(d_peer_ip));
-	}
-
-	if (sni.size()) {
-		d_sni = sni;
-		d_banner = sni;
-	}
-}
-
-
-server_session::~server_session()
+session::~session()
 {
 	if (d_ssl) {
 		SSL_shutdown(d_ssl);
-		//SSL_free(ssl);
+		SSL_free(d_ssl);
 	}
-
 	if (d_pubkey)
 		EVP_PKEY_free(d_pubkey);
-	// Do not mess with SSL_CTX, its not owned by us, but by server {}
+	if (d_privkey)
+		EVP_PKEY_free(d_privkey);
 
-	shutdown(d_sock, SHUT_RDWR);
+	if (d_type == SOCK_STREAM)
+		shutdown(d_peer_fd, SHUT_RDWR);
+
+	/* SSL_free() will also free SSL Ctx
+	if (d_ssl_ctx)
+		SSL_CTX_free(d_ssl_ctx);
+	*/
 
 	if (d_fd2state) {
 		for (int i = 3; i <= d_max_fd; ++i) {
@@ -144,774 +91,214 @@ server_session::~server_session()
 	}
 
 	delete [] d_pfds;
+
+	close(d_peer_fd);
 }
 
 
-// == 1 if OK
-int server_session::authenticate()
+int session::tx_add(int fd, const string &s)
 {
-	unsigned char rand[256] = {0}, md[EVP_MAX_MD_SIZE] = {0};
+	d_fd2state[fd].tx_len += s.size();
 
-	d_err = "server_session::authenticate::rand init failed";
-
-	// Also add some entropy in the child-session, as the PRNG-state
-	// is inherited from parent across fork()
-	if (RAND_load_file("/dev/urandom", 16) != 16)
-		return -1;
-	if (RAND_bytes(rand, sizeof(rand)) != 1)
-		return -1;
-	unique_ptr<EVP_MD_CTX, EVP_MD_CTX_del> md_ctx(EVP_MD_CTX_create(), EVP_MD_CTX_delete);
-	const EVP_MD *sha512 = EVP_sha512();
-	if (!sha512 || !md_ctx.get())
-		return -1;
-	if (EVP_DigestInit_ex(md_ctx.get(), sha512, nullptr) != 1)
-		return -1;
-	if (EVP_DigestUpdate(md_ctx.get(), rand, sizeof(rand)) != 1)
-		return -1;
-	if (EVP_DigestFinal_ex(md_ctx.get(), md, nullptr) != 1)
-		return -1;
-
-	char sbuf[MSG_BSIZE] = {0};
-
-	sprintf(sbuf, "A:sign1:%hu:", (unsigned short)EVP_MD_size(sha512));
-	memcpy(sbuf + strlen(sbuf), md, EVP_MD_size(sha512));
-
-	d_err = "server_session::authenticate:: auth exchange";
-
-	// write singing-request to client
-	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, MSG_BSIZE);
-	switch (SSL_get_error(d_ssl, n)) {
-	case SSL_ERROR_NONE:
-		break;
-	case SSL_ERROR_ZERO_RETURN:
-		return -1;
-	case SSL_ERROR_WANT_WRITE:
-	case SSL_ERROR_WANT_READ:
-		goto rewrite;
-	default:
-		d_err = "server_session::authenticate::SSL_write:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-
-	char rbuf[MSG_BSIZE + 1] = {0}, cmdbuf[256] = {0}, ubuf[64] = {0}, token[1024] = {0};
-
-	reread: ssize_t r = SSL_read(d_ssl, rbuf, MSG_BSIZE);
-	switch (SSL_get_error(d_ssl, r)) {
-	case SSL_ERROR_NONE:
-		break;
-	case SSL_ERROR_ZERO_RETURN:
-		return -1;
-	case SSL_ERROR_WANT_READ:
-	case SSL_ERROR_WANT_WRITE:
-		goto reread;
-	default:
-		d_err = "server_session::authenticate::SSL_read:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-
-	// start message parsing
-	d_err = "server_session::authenticate::message format error";
-	if (rbuf[0] != 'A')
-		return -1;
-
-	unsigned short major = 0, minor = 0, cmdlen = 0;
-	if (sscanf(rbuf, "A:sign1:crash-%hu.%hu:%32[^:]:%hu:", &major, &minor, ubuf, &cmdlen) != 4)
-		return -1;
-
-	if (cmdlen >= sizeof(cmdbuf))
-		return -1;
-
-	// find last ':'
-	char *ptr = strchr(rbuf + 8, ':');
-	if (!ptr++)
-		return -1;
-	ptr = strchr(ptr, ':');
-	if (!ptr++)
-		return -1;
-	ptr = strchr(ptr, ':');
-	if (!ptr++)
-		return -1;
-	if (r - (ptr - rbuf) < (ssize_t)cmdlen)
-		return -1;
-
-	memcpy(cmdbuf, ptr, cmdlen);
-	if (cmdlen)
-		d_cmd = cmdbuf;
-
-	ptr += cmdlen;
-	unsigned short tlen = 0;
-	if (sscanf(ptr, ":token:%hu:", &tlen) != 1)
-		return -1;
-	if (tlen >= sizeof(token) || tlen < 8)
-		return -1;
-	ptr = strchr(ptr + 7, ':');
-	if (!ptr++)
-		return -1;
-	if (r - (ptr - rbuf) < (ssize_t)tlen)
-		return -1;
-
-	memcpy(token, ptr, tlen);
-	// end message parsing
-
-	unsigned int i = 0;
-	for (; i < sizeof(ubuf); ++i) {
-		// just in case isspace() doesnt like \0 :)
-		if (!isspace(ubuf[i]) || ubuf[i] == 0)
-			break;
-	}
-	d_user = &ubuf[i];
-	// some basic checks
-	if (d_user.length() <= 1 || d_user.find("/", 0) != string::npos ||
-	    d_user.find(":", 0) != string::npos)
-		d_user = "[crashd]";
-
-	char falsch[] = "/bin/false";
-	struct passwd pw, *pwp = nullptr;
-	memset(&pw, 0, sizeof(pw));
-	pw.pw_shell = falsch;
-
-#ifndef ANDROID
-	char pwstr[4096] = {0};
-	getpwnam_r(d_user.c_str(), &pw, pwstr, sizeof(pwstr), &pwp);
-#else
-	pwp = getpwnam(d_user.c_str());
-#endif
-
-	// invalid user, or
-	// someone without a shell, except if always_login switch is given to crashd, or
-	// -U was given and someone else than current user wants to authenticate
-	if (!pwp || (!config::always_login && is_nologin(pwp->pw_shell)) ||
-	    (!config::uid_change && (pwp->pw_uid != geteuid()))) {
-		d_user = "[crashd]";
-		d_err = "server_session::authenticate: Invalid username.";
+	if (d_fd2state[fd].state == STATE_SSL && d_type == SOCK_DGRAM) {
+		d_fd2state[fd].ovec.push_back(s);
 	} else {
-		d_shell = pwp->pw_shell;
-		if (chdir(pwp->pw_dir) < 0)
-			;	// avoid gcc warning
-		d_home = pwp->pw_dir;
+		if (d_fd2state[fd].ovec.empty())
+			d_fd2state[fd].ovec.push_back(s);
+		else
+			d_fd2state[fd].ovec[0] += s;
+	}
 
-		if (config::uid_change && setgid(pwp->pw_gid) < 0) {
-			d_err = "server_session::authenticate::setgid:";
-			d_err += strerror(errno);
-			return -1;
-		}
-		if (config::uid_change && initgroups(d_user.c_str(), pwp->pw_gid) < 0) {
-			d_err = "server_session::authenticate::initgroups:";
-			d_err += strerror(errno);
-			return -1;
-		}
+	return 0;
+}
 
-		// Attention! we only set EUID to user, for accessing the keyfile.
-		// Later on, before the command is actually executed (shell session)
-		// the whole EUID/UID needs to be dropped. We need to keep root privs
-		// in order to log utmp/wtmp entries later. And we cannot do that now since
-		// we did not allocate a PTY yet. Otherwise we'd need to allocate a PTY
-		// before user is authenticated which looks wrong to me.
-		d_final_uid = pwp->pw_uid;
-		if (config::uid_change && setreuid((uid_t)-1, pwp->pw_uid) < 0) {
-			d_err = "server_session::authenticate::setreuid:";
-			d_err += strerror(errno);
-			return -1;
-		}
-		d_err = "auth failure for user '";
-		d_err += d_user;
-		d_err += "'";
-		string file = "";
-		if (config::user_keys.c_str()[0] == '/') {
-			file = config::user_keys;
+
+int session::tx_remove(int fd, string::size_type n)
+{
+
+	if (d_fd2state[fd].ovec.empty())
+		return 0;
+
+	if (d_fd2state[fd].state == STATE_SSL && d_type == SOCK_DGRAM) {
+		return 0;	// No removing of dgram data. It was already removed by tx_string().
+	} else {
+		d_fd2state[fd].ovec[0].erase(0, n);
+	}
+
+	if (n <= d_fd2state[fd].tx_len)
+		d_fd2state[fd].tx_len -= n;
+	else
+		d_fd2state[fd].tx_len = 0;
+
+	return 0;
+}
+
+
+string::size_type session::tx_size(int fd)
+{
+	return d_fd2state[fd].tx_len;
+}
+
+
+session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, string::size_type max)
+{
+	bk_str.clear();
+	seq = 0;
+
+	strview sv = bk_str;
+
+	if (d_fd2state[fd].ovec.empty())
+		return sv;
+
+	// only SSL sockets need special treatments of dgram/stream/sequenced packets,
+	// other out-buffers such as for pty, stdout etc just get the plain data
+	if (d_fd2state[fd].state == STATE_SSL) {
+		if (d_type == SOCK_STREAM) {
+			// Only pad if since last padding new payload data was added to queue.
+			// As there is only one socket (d_peer_fd) where we pad outgoing data,
+			// one variable (d_last_ssl_qlen) is sufficient and we don't need to have
+			// a variable inside d_fd2state.
+			if (d_last_ssl_qlen < d_fd2state[fd].ovec[0].size())
+				d_fd2state[fd].tx_len += pad_nops(d_fd2state[fd].ovec[0]);
+
+			if (d_fd2state[fd].ovec[0].size() > max)
+				sv = { d_fd2state[fd].ovec[0].c_str(), max };
+			else
+				sv = { d_fd2state[fd].ovec[0].c_str(), d_fd2state[fd].ovec[0].size() };
 		} else {
-			file = pwp->pw_dir;
-			file += "/";
-			file += config::user_keys;
-			file += "/authorized_keys";
-		}
-		FILE *fstream = fopen(file.c_str(), "r");
-		if (!fstream)
-			return -1;
+			auto it = d_fd2state[fd].ovec.begin();
+			for (; it != d_fd2state[fd].ovec.end(); ++it) {
 
-		// verify signature over the sha hash of the
-		// rand-bytes array
-		unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> pkey(PEM_read_PUBKEY(fstream, nullptr, nullptr, nullptr), EVP_PKEY_free);
-		fclose(fstream);
-		if (!pkey.get()) {
-			syslog().log("no userkey");
-			return -1;
-		}
+				// SQ-packets and already sequenced packets (via d_tx_map<> resend) only as single dgrams
+				if (it->find("C:SQ:") == 6 || it->find("C:PN:") == 6) {
+					if (bk_str.empty())
+						bk_str = *it++;
+					break;
+				}
+				if (bk_str.size() + it->size() + SEQ_PSIZE <= max)
+					bk_str += *it;
+				else
+					break;
+			}
 
-		// Ok? see above comment. Will drop that later completely to "final_uid".
-		if (config::uid_change) {
-			if (setreuid(0, 0) < 0)
-				;	// avoid gcc warning
-		}
+			// In dgram case the data is immediately removed from queueing by tx_string(),
+			// since SSL socket will be non-blocking and not writing partial
+			// (it is either written at once or not at all) and the final dgram will be kept
+			// in d_tx_map<> for a possible resend. This makes modding the ovec[] with :PN:...
+			// and pads spanning multiple vector entries unnecessary.
+			d_fd2state[fd].tx_len -= bk_str.size();
+			d_fd2state[fd].ovec.erase(d_fd2state[fd].ovec.begin(), it);
 
-		if (EVP_VerifyInit_ex(md_ctx.get(), sha512, nullptr) != 1)
-			return -1;
-		if (EVP_VerifyUpdate(md_ctx.get(), d_banner.c_str(), d_banner.size()) != 1)
-			return -1;
-		if (EVP_VerifyUpdate(md_ctx.get(), md, EVP_MD_size(sha512)) != 1) // 'challenge' that was sent to client
-			return -1;
-		int pubkeylen = i2d_PublicKey(d_pubkey, nullptr);
-		if (pubkeylen <= 0 || pubkeylen >= 32000)
-			return -1;
-		unique_ptr<unsigned char[]> b1(new (nothrow) unsigned char[pubkeylen]);
-		unsigned char *b2 = nullptr;
-		if (!b1.get())
-			return -1;
-		b2 = b1.get();
-		// The b2/b1 foo looks strange but is correct. Check the i2d_X509 man-page on
-		// how ppout is treated for i2d_TYPE().
-		if (i2d_PublicKey(d_pubkey, &b2) != pubkeylen)
-			return -1;
-		// DER encoding of server pubkey
-		if (EVP_VerifyUpdate(md_ctx.get(), b1.get(), pubkeylen) != 1)
-			return -1;
-		int v = EVP_VerifyFinal(md_ctx.get(), reinterpret_cast<unsigned char*>(token), tlen, pkey.get());
-		return v;
-	}
-	return 0;
-}
+			// If a seq# was added, pass it to upper layer. It may be a resend from d_tx_map<>,
+			// in which case no new seq# is added and 'seq' stays 0 to signal this.
+			if (prepend_seq(d_flow.tx_sequence, bk_str) > 0)
+				seq = d_flow.tx_sequence;
+			pad_nops(bk_str);
 
-
-int server_session::handle()
-{
-	struct itimerval iti;
-
-	memset(&iti, 0, sizeof(iti));
-	iti.it_value.tv_sec = 12;
-	setitimer(ITIMER_REAL, &iti, nullptr);
-
-	// If a SNI is set, we immediately accept TLS traffic w/o banner and the d_banner
-	// is set to the SNI for Verify()
-	if (!d_sni.size()) {
-		if (writen(d_sock, d_banner.c_str(), d_banner.length()) != (int)(d_banner.length())) {
-			d_err = "server_session::handle::writen:";
-			d_err += strerror(errno);
-			return -1;
-		}
-	}
-
-	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr) {
-		d_err = "server_session::handle::SSL_new:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-
-	SSL_set_fd(d_ssl, d_sock);
-
-	if (SSL_accept(d_ssl) <= 0) {
-		d_err = "server_session::handle::SSL_accept:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-
-	if (d_sni.size()) {
-		string peer_sni = SSL_get_servername(d_ssl, TLSEXT_NAMETYPE_host_name);
-		if (d_sni != peer_sni) {
-			d_err = "server_session: Wrong SNI by client. Rejecting.";
-			return -1;
-		}
-	}
-
-	// Get our own X509 for authentication input. This has moved below
-	// SSL_accept() since OSX ships with buggy OpenSSL that segfaults
-	// with nullptr ptr access if the SSL object is not connected: search for
-	// 'nullptr ptr deref when calling SSL_get_certificate'
-	X509 *cert = SSL_get_certificate(d_ssl);
-	if (!cert) {
-		d_err = "server_session::handle::SSL_get_certificate:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-	d_pubkey = X509_get_pubkey(cert);
-	X509_free(cert);
-	if (!d_pubkey) {
-		d_err = "server_session::handle::X509_get_pubkey:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
-	}
-
-
-	// authenticate, this already sets EGID/GID and groups
-	// but NOT EUID/UID!
-	if (authenticate() != 1)
-		return -1;
-
-	memset(&iti, 0, sizeof(iti));
-	setitimer(ITIMER_REAL, &iti, nullptr);
-
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-	sa.sa_handler = sess_sig_chld;
-	sa.sa_flags = SA_RESTART;
-	sigaction(SIGCHLD, &sa, nullptr);
-
-	if (d_cmd.size() > 0) {
-		if (d_iob.init_pipe() < 0) {
-			d_err = "server_session::handle:: I/O channel setup:";
-			d_err += d_iob.why();
-			return -1;
+			// dgram case needs to have strview of backing string returned, as content was removed from ovec
+			return sv = bk_str;
 		}
 	} else {
-		if (d_iob.init_pty(d_final_uid, -1, 0600) < 0) {
-			d_err = "server_session::handle:: PTY setup:";
-			d_err += d_iob.why();
-			return -1;
-		}
+		if (d_fd2state[fd].ovec[0].size() > max)
+			sv = { d_fd2state[fd].ovec[0].c_str(), max };
+		else
+			sv = { d_fd2state[fd].ovec[0].c_str(), d_fd2state[fd].ovec[0].size() };
 	}
 
-	string l = "SUCCESS: opening session for user '";
-	l += d_user;
-	l += "'";
-	syslog().log(l);
-
-	// only on a pipe in non-pty mode, unused for other cases
-	if ((pipe_child = fork()) == 0) {
-		long mfd = sysconf(_SC_OPEN_MAX);
-		for (long i = 0; i <= mfd; ++i) {
-			if (i != d_iob.slave0() && i != d_iob.slave1() && i != d_iob.slave2())
-				close(i);
-		}
-		setsid();
-#if (defined __FreeBSD__) || (defined __NetBSD__) || (defined __OpenBSD__) || (defined __APPLE__)
-		if (config::uid_change && !config::silent && setlogin(d_user.c_str()) < 0) {
-			d_err = "FAIL: server_session::handle::setlogin:";
-			d_err += strerror(errno);
-			syslog().log(d_err);
-
-			// No "return"s here, since we are in a child, and we want the
-			// parent which is handling out crypto stream do the cleanup
-			// and not return the ->handle() caller directly
-			exit(1);
-		}
-#endif
-		if (config::uid_change && setuid(d_final_uid) < 0) {
-			d_err = "FAIL: server_session::handle::setuid:";
-			d_err += strerror(errno);
-			syslog().log(d_err);
-			exit(1);
-		}
-
-		char *a[] = {nullptr, nullptr, nullptr, nullptr};
-
-		// dont honor pw shell entry in case of always-login
-		if (config::always_login) {
-#ifdef ANDROID
-			a[0] = strdup("/system/bin/sh");
-#else
-			a[0] = strdup("/bin/sh");
-#endif
-		} else
-			a[0] = strdup(d_shell.c_str());
-
-		if (d_cmd.size() > 0) {
-			a[1] = strdup("-c");
-			a[2] = strdup(d_cmd.c_str());
-		}
-
-		dup2(d_iob.slave0(), 0);
-		dup2(d_iob.slave1(), 1);
-		dup2(d_iob.slave2(), 2);
-
-		d_iob.close_master();
-		d_iob.close_slave();
-
-		ioctl(0, TIOCSCTTY, 0);
-
-		string h = "HOME=";
-		h += d_home;
-		char *const env[] = {strdup(h.c_str()), nullptr};
-		execve(*a, a, env);
-		exit(0);
-	} else if (pipe_child < 0) {
-		d_err = "server_session::handle::";
-		d_err += strerror(errno);
-		return -1;
-	}
-
-	if (d_iob.is_pty())
-		logger::login(d_iob.pts_name(), d_user, d_peer_ip);
-
-	if (config::uid_change && setuid(d_final_uid) < 0) {
-		d_err = "server_session::handle::setuid:";
-		d_err += strerror(errno);
-		return -1;
-	}
-
-	d_iob.close_slave();
-
-	struct rlimit rl;
-	if (getrlimit(RLIMIT_NOFILE, &rl) < 0)
-		return -1;
-
-	if (!(d_pfds = new (nothrow) pollfd[rl.rlim_cur]))
-		return -1;
-	if (!(d_fd2state = new (nothrow) state[rl.rlim_cur]))
-		return -1;
-
-	d_fd2state[d_iob.master0()].fd = d_iob.master0();
-	d_fd2state[d_iob.master0()].state = STATE_PTY;
-	d_fd2state[d_iob.master1()].fd = d_iob.master1();
-	d_fd2state[d_iob.master1()].state = STATE_PTY;
-	d_fd2state[d_iob.master2()].fd = d_iob.master2();
-	d_fd2state[d_iob.master2()].state = STATE_PTY;
-
-	d_fd2state[d_sock].fd = d_sock;
-	d_fd2state[d_sock].state = STATE_SSL;
-
-	for (unsigned int i = 0; i < rl.rlim_cur; ++i) {
-		d_pfds[i].fd = -1;
-		d_pfds[i].events = d_pfds[i].revents = 0;
-	}
-
-	d_pfds[d_iob.master0()].fd = d_iob.master0();
-	d_pfds[d_iob.master0()].events |= POLLOUT;
-	d_pfds[d_iob.master1()].fd = d_iob.master1();
-	d_pfds[d_iob.master1()].events |= POLLIN;
-	d_pfds[d_iob.master2()].fd = d_iob.master2();
-	d_pfds[d_iob.master2()].events |= POLLIN;
-
-	d_pfds[d_sock].fd = d_sock;
-	d_pfds[d_sock].events = POLLIN;
-
-	// only now set non-blocking mode and moving write buffers
-	int flags = fcntl(d_sock, F_GETFL);
-	fcntl(d_sock, F_SETFL, flags|O_NONBLOCK);
-	SSL_set_mode(d_ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
-
-	d_max_fd = d_sock;
-
-	char pty_buf[PTY_BSIZE] = {0}, rbuf[RBUF_BSIZE] = {0}, sbuf[MTU] = {0};
-
-	ssize_t r = 0;
-	int i = 0, poll_to = 1000, stdin_can_close = 1, ssl_read_wants_write = 0;
-
-	string::size_type last_ssl_qlen = 0;
-
-	// exit condition checked around poll()
-	for (;;) {
-
-		// if peer has signalled closed stdin, check if we can do so if no data is left to be written to input
-		if (stdin_can_close && d_stdin_closed && d_fd2state[d_iob.master0()].obuf.size() == 0) {
-			d_iob.close_master0();
-			d_fd2state[i].state = STATE_INVALID;
-			d_fd2state[i].obuf.clear();
-			d_pfds[i].fd = -1;
-			d_pfds[i].events = 0;
-			stdin_can_close = 0;
-		}
-
-		for (i = rl.rlim_cur - 1; i > 0; --i) {
-			if (d_fd2state[i].state != STATE_INVALID && d_fd2state[i].fd != -1) {
-				d_max_fd = i;
-				break;
-			}
-		}
-
-		errno = 0;
-
-		// faster polls if child already exited and we are just about to flush remaining data
-		if (pipe_child_exited && d_fd2state[d_sock].obuf.size() == 0)
-			poll_to = 0;
-
-		if ((r = poll(d_pfds, d_max_fd + 1, poll_to)) <= 0) {
-
-			// signal caught
-			if (errno == EINTR)
-				continue;
-
-			// child exited and no data left to flush? Thats a clean exit!
-			if (r == 0 && pipe_child_exited && d_fd2state[d_sock].obuf.size() == 0)
-				return 0;
-
-			// real error
-			if (r < 0)
-				return -1;
-
-			// no fd ready to write, but still data pending. continue
-			continue;
-		}
-
-		time_t now = time(nullptr);
-
-		for (i = 0; i <= d_max_fd; ++i) {
-
-			if (d_fd2state[i].state == STATE_INVALID)
-				continue;
-
-			if ((d_fd2state[i].state == STATE_CLOSING && (now - d_fd2state[i].time) > CLOSING_TIME) ||
-			    (d_fd2state[i].state == STATE_UDPCLIENT && (now - d_fd2state[i].time) > UDP_CLOSING_TIME && d_fd2state[i].odgrams.empty())) {
-				close(i);
-				d_fd2state[i].fd = -1;
-				d_fd2state[i].state = STATE_INVALID;
-				d_fd2state[i].obuf.clear();
-				d_pfds[i].fd = -1;
-				d_pfds[i].events = 0;
-				continue;
-			}
-
-			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
-
-				if (d_fd2state[i].state == STATE_SSL) {
-					flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
-				}
-
-				if (d_fd2state[i].state == STATE_CONNECTED || d_fd2state[i].state == STATE_CONNECT) {
-					d_pfds[d_sock].events |= POLLOUT;
-					d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size());
-					d_fd2state[d_sock].obuf += ":C:T:F:" + d_fd2state[i].rnode;	// signal finished connection to remote
-					tcp_nodes2sock.erase(d_fd2state[i].rnode);
-				}
-
-				// poll() can report hangup on PTY whilst still delivering data from that fd.
-				// do not close in this case but continue the revent treatment
-				if (!(d_fd2state[i].state == STATE_PTY && (d_pfds[i].revents & POLLIN))) {
-					close(i);
-					d_fd2state[i].fd = -1;
-					d_fd2state[i].state = STATE_INVALID;
-					d_fd2state[i].obuf.clear();
-					d_pfds[i].fd = -1;
-					d_pfds[i].events = 0;
-					continue;
-				}
-			}
-
-			if ((d_pfds[i].revents & (POLLIN|POLLOUT)) == 0)
-				continue;
-
-			unsigned short revents = d_pfds[i].revents;
-			d_pfds[i].revents = 0;
-
-			if (d_fd2state[i].state == STATE_PTY) {
-				d_pfds[i].events = POLLIN;
-
-				if (revents & POLLIN) {
-					if ((r = read(i, pty_buf, sizeof(pty_buf))) <= 0) {
-						if (errno != EINTR) {
-							close(i);
-							d_fd2state[i].fd = -1;
-							d_fd2state[i].state = STATE_INVALID;
-							d_fd2state[i].obuf.clear();
-							d_pfds[i].fd = -1;
-							d_pfds[i].events = 0;
-							continue;
-						}
-					} else {
-
-						d_fd2state[d_sock].obuf += slen(6 + r);
-						if (i == d_iob.master1())
-							d_fd2state[d_sock].obuf += ":D:O1:";	// output from stdout
-						else
-							d_fd2state[d_sock].obuf += ":D:O2:";	// stderr
-						d_fd2state[d_sock].obuf += string(pty_buf, r);
-						d_pfds[d_sock].events |= POLLOUT;
-					}
-				}
-				if ((revents & POLLOUT) && d_fd2state[i].obuf.size() > 0) {
-					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
-					if ((r = write(i, d_fd2state[i].obuf.c_str(), nw)) <= 0) {
-						if (errno != EINTR) {
-							close(i);
-							d_fd2state[i].fd = -1;
-							d_fd2state[i].state = STATE_INVALID;
-							d_fd2state[i].obuf.clear();
-							d_pfds[i].fd = -1;
-							d_pfds[i].events = 0;
-							continue;
-						}
-						r = 0;
-					}
-					if (r > 0)
-						d_fd2state[i].obuf.erase(0, r);
-				}
-
-				if (d_fd2state[i].obuf.size() > 0)
-					d_pfds[i].events |= POLLOUT;
-
-			} else if (d_fd2state[i].state == STATE_SSL) {
-
-				d_pfds[i].events = POLLIN;
-
-				if (d_fd2state[i].obuf.size() > 0) {
-
-					// Only pad if since last padding new payload data was added to queue.
-					// As there is only one socket (d_sock) where we pad outgoing data,
-					// one variable (last_ssl_qlen) is sufficient and we don't need to have
-					// a variable inside d_fd2state.
-					if (last_ssl_qlen < d_fd2state[i].obuf.size())
-						pad_nops(d_fd2state[i].obuf);
-
-					size_t nw = d_fd2state[i].obuf.size() > CHUNK_SIZE ? CHUNK_SIZE : d_fd2state[i].obuf.size();
-					ssize_t n = SSL_write(d_ssl, d_fd2state[i].obuf.c_str(), nw);
-					switch (SSL_get_error(d_ssl, n)) {
-					case SSL_ERROR_ZERO_RETURN:
-						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
-						return 0;
-					case SSL_ERROR_NONE:
-					case SSL_ERROR_WANT_WRITE:
-					case SSL_ERROR_WANT_READ:
-						break;
-					default:
-						d_err = "server_session::handle::SSL_write:";
-						d_err += ERR_error_string(ERR_get_error(), nullptr);
-						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
-						return -1;
-					}
-					if (n > 0)
-						d_fd2state[i].obuf.erase(0, n);
-					last_ssl_qlen = d_fd2state[i].obuf.size();
-					if (ssl_read_wants_write || last_ssl_qlen > 0)
-						d_pfds[i].events |= POLLOUT;
-
-					if (!(revents & POLLIN) && !ssl_read_wants_write)
-						continue;
-				}
-
-				if (revents & (POLLIN|POLLOUT)) {
-
-					ssl_read_wants_write = 0;
-
-					ssize_t n = SSL_read(d_ssl, rbuf, sizeof(rbuf));
-					switch (SSL_get_error(d_ssl, n)) {
-					case SSL_ERROR_NONE:
-						break;
-					case SSL_ERROR_ZERO_RETURN:
-						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
-						return 0;
-					case SSL_ERROR_WANT_WRITE:
-						d_pfds[i].events |= POLLOUT;
-						ssl_read_wants_write = 1;
-						break;
-					case SSL_ERROR_WANT_READ:
-						break;
-					default:
-						d_err = "server_session::handle::SSL_read:";
-						d_err += ERR_error_string(ERR_get_error(), nullptr);
-						flush_fd(d_iob.master0(), d_fd2state[d_iob.master0()].obuf);
-						return -1;
-					}
-
-					if (n > 0)
-						d_fd2state[i].ibuf += string(rbuf, n);
-
-					while (handle_input(i) > 0);
-				}
-			}
-
-			if (d_fd2state[i].state < STATE_ACCEPT)
-				continue;
-
-			// net cmd handler
-
-			if (revents & POLLIN) {
-
-				if (d_fd2state[i].state == STATE_CONNECTED) {
-					if ((r = recv(i, sbuf, sizeof(sbuf), 0)) <= 0) {
-						close(i);
-						d_pfds[i].fd = -1;
-						d_pfds[i].events = 0;
-						d_fd2state[i].state = STATE_INVALID;
-						d_fd2state[i].fd = -1;
-						d_fd2state[i].obuf.clear();
-						tcp_nodes2sock.erase(d_fd2state[i].rnode);
-
-						d_pfds[d_sock].events |= POLLOUT;
-						d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size());
-						d_fd2state[d_sock].obuf += ":C:T:F:" + d_fd2state[i].rnode;	// signal finished connection to remote
-						continue;
-					}
-
-					d_pfds[d_sock].events |= POLLOUT;
-					d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size() + r);
-					d_fd2state[d_sock].obuf += ":C:T:R:" + d_fd2state[i].rnode + string(sbuf, r);	// received TCP data
-				} else if (d_fd2state[i].state == STATE_UDPCLIENT) {
-					if ((r = recv(i, sbuf, sizeof(sbuf), 0)) <= 0)
-						continue;
-
-					d_pfds[d_sock].events |= POLLOUT;
-					d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size() + r);
-					d_fd2state[d_sock].obuf += ":C:U:R:" + d_fd2state[i].rnode + string(sbuf, r);	// received UDP data
-				}
-
-			}
-			if (revents & POLLOUT) {
-
-				if (d_fd2state[i].state == STATE_CONNECT) {
-					int e = 0;
-					socklen_t elen = sizeof(e);
-					if (getsockopt(i, SOL_SOCKET, SO_ERROR, &e, &elen) < 0 || e != 0) {
-						close(i);
-						d_pfds[i].fd = -1;
-						d_pfds[i].events = 0;
-						d_fd2state[i].state = STATE_INVALID;
-						d_fd2state[i].fd = -1;
-						d_fd2state[i].obuf.clear();
-						tcp_nodes2sock.erase(d_fd2state[i].rnode);
-
-						d_pfds[d_sock].events |= POLLOUT;
-						d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size());
-						d_fd2state[d_sock].obuf += ":C:T:F:" + d_fd2state[i].rnode;	// signal finished connection to remote
-						continue;
-					}
-
-					d_pfds[i].events = POLLIN;
-					d_fd2state[i].state = STATE_CONNECTED;
-					d_fd2state[i].time = now;
-
-					d_pfds[d_sock].events |= POLLOUT;
-					d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size());
-					d_fd2state[d_sock].obuf += ":C:T:C:" + d_fd2state[i].rnode;	// TCP connect() finished, connection is set up
-
-				} else if (d_fd2state[i].state == STATE_CONNECTED) {
-					if ((r = send(i, d_fd2state[i].obuf.c_str(), d_fd2state[i].obuf.size(), 0)) <= 0) {
-						close(i);
-						d_pfds[i].fd = -1;
-						d_pfds[i].events = 0;
-						d_fd2state[i].state = STATE_INVALID;
-						d_fd2state[i].fd = -1;
-						d_fd2state[i].obuf.clear();
-						tcp_nodes2sock.erase(d_fd2state[i].rnode);
-
-						d_pfds[d_sock].events |= POLLOUT;
-						d_fd2state[d_sock].obuf += slen(7 + d_fd2state[i].rnode.size());
-						d_fd2state[d_sock].obuf += ":C:T:F:" + d_fd2state[i].rnode;	// signal finished connection to remote
-						continue;
-					}
-
-					d_fd2state[i].obuf.erase(0, r);
-				} else if (d_fd2state[i].state == STATE_UDPCLIENT) {
-					string &dgram = d_fd2state[i].odgrams.front();
-					// No need to sendto(), each socket with ID is connect()'ed since -U binding already knows
-					// the remote IP:port to send to
-					if ((r = send(i, dgram.c_str(), dgram.size(), 0)) <= 0)
-						continue;
-
-					d_fd2state[i].odgrams.pop_front();
-					d_fd2state[i].ulports.pop_front();	// unused in server part; yet filled in external cmd_handler()
-				}
-
-				if (d_fd2state[i].obuf.empty() && d_fd2state[i].odgrams.empty())
-					d_pfds[i].events &= ~POLLOUT;
-			}
-		}
-	}
+	return sv;
+}
+
+
+string session::tx_string_and_clear(int fd, string::size_type max)
+{
+	sequence_t seq = 0;
+	string bk_str;
+	bk_str.reserve(2*CHUNK_SIZE);
+
+	if (tx_empty(fd))
+		return bk_str;
+
+	if (max == 0)
+		max = tx_size(fd);
+
+	auto sv = tx_string(fd, seq, bk_str, max);
+
+	// if backing string is empty after return, it means we have streams based optimization
+	// and need to copy the strview, as we are meant to return a string that survives
+	// the clearance of ovec buffers
+	if (bk_str.empty())
+		bk_str = string(sv.c_str(), sv.size());
+
+	// not we have the str, it can be cleared
+	tx_clear(fd);
+
+	// no move(), RVO
+	return bk_str;
+}
+
+
+bool session::tx_empty(int fd)
+{
+	return d_fd2state[fd].tx_len == 0;
+}
+
+
+void session::tx_clear(int fd)
+{
+	d_fd2state[fd].tx_len = 0;
+	d_fd2state[fd].ovec.clear();
+}
+
+
+bool session::tx_can_add(int fd)
+{
+	// only send new dgrams if peer acknowledged us ours within a certain window (peer's RX# is our TX#)
+	return (d_type == SOCK_STREAM || (d_flow.tx_sequence - d_flow.last_rx_seen <= MAX_OVEC_SIZE));
+}
+
+
+bool session::tx_must_add_sq(int fd)
+{
+	if (d_fd2state[fd].state == STATE_INVALID)
+		return 0;
+
+	// if we did not send a SQ pkt for quite some time, force one
+	if (d_flow.tx_sequence - d_flow.last_tx_sq_added > MAX_OVEC_SIZE)
+		return 1;
 
 	return 0;
 }
 
 
-int server_session::handle_input(int i)
+int session::tx_add_sq(int fd)
 {
+	if (d_fd2state[fd].state == STATE_INVALID)
+		return 0;
 
+	char buf[64] = {0};
+	snprintf(buf, sizeof(buf) - 1, "%05hu:C:SQ:%016llx:%016llx:", 6 + 34, d_flow.rx_sequence, d_flow.tx_sequence);
+
+	tx_add(fd, buf);
+	d_pfds[fd].events |= POLLOUT;
+
+	d_flow.last_rx_acked = d_flow.rx_sequence;
+	d_flow.last_tx_sq_added = d_flow.tx_sequence;
+
+	return 1;
+}
+
+
+// cmd handler that is common for client and server sessions
+int session::handle_input(int i)
+{
 	string &cmd = d_fd2state[i].ibuf;
 
 	if (cmd.size() < 7)
 		return 0;
 
 	unsigned short l = 0;
-	if (sscanf(cmd.c_str(), "%hu:", &l) != 1)
-		return -1;
+	if (sscanf(cmd.c_str(), "%05hu:", &l) != 1)
+		return 0;
 	size_t len = l;
 
 	if (len < 6)
@@ -919,34 +306,88 @@ int server_session::handle_input(int i)
 	if (cmd.size() < 5 + len)	// 5bytes %05hu + :C:...
 		return 0;
 
-	if (cmd.find("D:I0:", 6) == 6) {
-		d_pfds[d_iob.master0()].events |= POLLOUT;
-		d_fd2state[d_iob.master0()].obuf += cmd.substr(5 + 6, len - 6);
-	} else if (cmd.find("C:WS:", 6) == 6) {
-		struct winsize ws;
-		if (sscanf(cmd.c_str() + 5 + 6, "%hu:%hu:%hu:%hu", &ws.ws_row, &ws.ws_col, &ws.ws_xpixel, &ws.ws_ypixel) == 4) {
-			if (d_iob.is_pty())
-				ioctl(d_iob.master1(), TIOCSWINSZ, &ws);
+	if (d_type == SOCK_DGRAM && cmd.find("C:SQ:", 6) == 6) {
+		sequence_t peer_rx = 0, peer_tx = 0;
+		if (sscanf(cmd.c_str() + 5, ":C:SQ:%016llx:%016llx:", &peer_rx, &peer_tx) == 2) {
+
+			// up to seq# 'peer_rx' has been received, so remove from our TX map
+			for (; d_flow.last_rx_seen < peer_rx; ++d_flow.last_rx_seen)
+				d_tx_map.erase(d_flow.last_rx_seen);
+
+			// peer is missing some of our packets?
+			if (peer_rx < d_flow.tx_sequence) {
+
+				// re-send some of the missing packets, if any
+				for (sequence_t i = peer_rx; i < d_flow.tx_sequence && i - peer_rx <= MAX_OVEC_SIZE/2; ++i) {
+					tx_add(d_peer_fd, d_tx_map[i]);
+					d_pfds[d_peer_fd].events |= POLLOUT;
+				}
+			}
+		}
+
+	// packet seq number as added by prepend_seq()
+	} else if (d_type == SOCK_DGRAM && cmd.find("C:PN:", 6) == 6) {
+		sequence_t seq = 0;
+		if (sscanf(cmd.c_str() + 5, ":C:PN:%016llx:", &seq) == 1) {
+
+			// keep seq#s that are to be expected in future and try to put some in order
+			// that may be found in d_rx_map<>
+			if (seq > d_flow.rx_sequence) {
+
+				// :PN: packets wrap the next data packet completely with its len
+				d_rx_map[seq] = cmd.substr(0, 5 + len);
+				cmd.erase(0, 5 + len);
+
+				// maybe the expected seq# was already put to the d_rx_map<> ?
+				if (d_rx_map.count(d_flow.rx_sequence) > 0) {
+					cmd.insert(0, move(d_rx_map[d_flow.rx_sequence]));
+					d_rx_map.erase(d_flow.rx_sequence);
+				}
+				return 1;
+
+			// the exact next expected seq#, increase and continue processing
+			} else if (seq == d_flow.rx_sequence) {
+
+				// Acknowledge so far, if we received more than half of the window w/o acking them.
+				// If we miss this code path due to missing :PN: pkts, the main poll loop will trigger sending
+				// acks by timeouts.
+				if (d_flow.rx_sequence - d_flow.last_rx_acked >= MAX_OVEC_SIZE/2)
+					tx_add_sq(d_peer_fd);
+
+				++d_flow.rx_sequence;
+				d_rx_map.erase(seq);	// erase from map in case it was kept
+
+				// Check rx map for possibly next packet to process along and
+				// erase from map if any. Insert right behind currently processed packet in this case.
+				auto next = d_rx_map.find(d_flow.rx_sequence);
+				if (next != d_rx_map.end()) {
+					cmd.insert(5 + len, move(next->second));
+					d_rx_map.erase(next);
+				}
+
+				// :PN: packets wrap the entire packet with its len, so let remove the fixed :PN: seq# hdr
+				// to obtain data packet for next processing loop.
+				len = SEQ_PSIZE - 5;
+
+			// remove duped packets from queue
+			} else {
+				;	// done by 'cmd.erase(0, 5 + len);' at end of the function
+			}
 		}
 	// ping request
 	} else if (cmd.find("C:PP:", 6) == 6) {
 		const string echo = cmd.substr(5 + 6, len - 6);
-		d_fd2state[d_sock].obuf += slen(6 + echo.size());
-		d_fd2state[d_sock].obuf += ":C:PR:" + echo;
-		d_pfds[d_sock].events |= POLLOUT;
+		tx_add(d_peer_fd, slen(6 + echo.size()) + ":C:PR:" + echo);
+		d_pfds[d_peer_fd].events |= POLLOUT;
 	} else if (cmd.find("C:T:", 6) == 6 || cmd.find("C:U:", 6) == 6) {
-		net_cmd_handler(cmd, d_fd2state, d_pfds, NETCMD_SEND_ALLOW);
 
-	// remote peer has closed stdin
-	} else if (cmd.find("C:CL:0", 6) == 6) {
-		d_stdin_closed = 1;
+		// also remove cmd from buffer it net handler returns error
+		net_cmd_handler(cmd);
+
 	} else if (cmd.find("C:PR:", 6) == 6) {
 		;	// ignore ping replies
 	} else if (cmd.find("C:NO:", 6) == 6) {
 		;	// ignore nops
-
-	// The traffic management options may be triggered by the client, so these will not be
-	// found in crashc.cc
 
 	// disable traffic padding
 	} else if (cmd.find("C:P0:", 6) == 6) {
@@ -955,11 +396,152 @@ int server_session::handle_input(int i)
 	} else if (cmd.find("C:P9:", 6) == 6) {
 		config::traffic_flags &= ~TRAFFIC_NOPAD;
 		config::traffic_flags |= TRAFFIC_PADMAX;
+
+	} else {
+
+		// Valid len/data packet but no command handled. Do not erase it, it may be for the derived
+		// class. Let them check and erase.
+		return 1;
 	}
 
+	// One command was handled above. Erase this particular cmd.
 	cmd.erase(0, 5 + len);
 
-	// one command was handled. There may be more in the ibuf
+	// There may be more cmds in the ibuf. Pass to derived class.
+	return 1;
+}
+
+
+/*
+ * C:T:N:IP/port/ID/		-> open new TCP connection to IP:port
+ * C:T:C:IP/port/ID/	  	-> connection to IP:port is estabished on remote side
+ * C:T:S:IP/port/ID/data	-> send data to IP:port
+ * C:T:R:IP/port/ID/data	-> data received from IP:port on remote side
+ * C:T:F:IP/port/ID/		-> close connection belonging to IP:port
+ *
+ * C:U:S:IP/port/ID/data	-> send UDP datagram to IP:port
+ * C:U:R:IP/port/ID/data	-> received UDP datagram from IP:port on remote side
+ *
+ */
+int session::net_cmd_handler(const string &cmd)
+{
+	char C[16] = {0}, proto[16] = {0}, op[16] = {0}, host[128] = {0};
+	uint16_t port = 0, id = 0;
+	unsigned short len = 0;
+	int sock = -1;
+
+	// ID is the logical channel to distinguish between multiple same host:port connections.
+	// The accepted socket fd of the local part is unique and good for it. FDID_MAX ensures it can be encoded as %hx.
+	if (sscanf(cmd.c_str(), "%05hu:%15[^:]:%15[^:]:%15[^:]:%127[^/]/%04hx/%04hx/", &len, C, proto, op, host, &port, &id) != 7)
+		return 0;
+
+	auto slash = cmd.find("/");
+	const string node = string(host) + cmd.substr(slash, 11);
+
+	if (len < 7 + node.size() || len > cmd.size() - 5)
+		return 0;
+
+	if (C[0] != 'C' || (proto[0] != 'T' && proto[0] != 'U'))
+		return -1;
+
+	// open new non-blocking connection
+	if (cmd.find("C:T:N:", 6) == 6 && (d_net_cmd_flags & NETCMD_SEND_ALLOW)) {
+		if ((sock = tcp_connect(host, to_string(port))) < 0)
+			return -1;
+
+		d_pfds[sock].revents = 0;
+		d_pfds[sock].events = POLLOUT;
+		d_pfds[sock].fd = sock;
+
+		d_fd2state[sock].fd = sock;
+		d_fd2state[sock].state = STATE_CONNECT;
+		d_fd2state[sock].odgrams.clear();
+		d_fd2state[sock].ulports.clear();
+		d_fd2state[sock].rnode = node;
+		d_fd2state[sock].time = d_now;
+		tx_clear(sock);
+
+		tcp_nodes2sock[node] = sock;
+
+	// non-blocking connect() got ready
+	} else if (cmd.find("C:T:C:", 6) == 6) {
+		auto it = tcp_nodes2sock.find(node);
+		if (it == tcp_nodes2sock.end())
+			return -1;
+		sock = it->second;
+
+		d_pfds[sock].events = POLLIN;
+
+		d_fd2state[sock].fd = sock;
+		d_fd2state[sock].state = STATE_CONNECTED;
+		d_fd2state[sock].odgrams.clear();
+		d_fd2state[sock].ulports.clear();
+		d_fd2state[sock].time = d_now;
+		tx_clear(sock);
+
+	// finish connection
+	} else if (cmd.find("C:T:F:", 6) == 6) {
+		auto it = tcp_nodes2sock.find(node);
+		if (it == tcp_nodes2sock.end())
+			return -1;
+		sock = it->second;
+		tcp_nodes2sock.erase(it);
+
+		// flush any remaining data
+		flush_fd(sock, tx_string_and_clear(sock));
+
+		// sock will be closed in main poll() loop via timeout
+		shutdown(sock, SHUT_RDWR);
+		d_pfds[sock].fd = -1;
+		d_pfds[sock].events = 0;
+
+		d_fd2state[sock].state = STATE_CLOSING;
+		d_fd2state[sock].odgrams.clear();
+		d_fd2state[sock].ulports.clear();
+		d_fd2state[sock].time = d_now;
+
+	// Send or receive data. No NETCMD_SEND_ALLOW check, since the node will not be in
+	// the tcp_nodes2sock map in the first place, as there was no tcp_connect() and no map
+	// insertion.
+	} else if (cmd.find("C:T:S:", 6) == 6 || cmd.find("C:T:R:", 6) == 6) {
+		auto it = tcp_nodes2sock.find(node);
+		if (it == tcp_nodes2sock.end())
+			return -1;
+		sock = it->second;
+		tx_add(sock, cmd.substr(5 + 7 + node.size(), len - 7 - node.size()));	// strip off data part
+		d_pfds[sock].events |= POLLOUT;
+		d_fd2state[sock].time = d_now;
+
+	} else if (cmd.find("C:U:S:", 6) == 6 || cmd.find("C:U:R:", 6) == 6) {
+		auto it = udp_nodes2sock.find(node);
+		if (it == udp_nodes2sock.end()) {
+			if (!(d_net_cmd_flags & NETCMD_SEND_ALLOW))
+				return 0;
+			if ((sock = udp_connect(host, to_string(port))) < 0)
+				return -1;
+			udp_nodes2sock[node] = sock;
+
+			// Just fill rnode part in server side. client main loop expects ID/ part not to be
+			// appended
+			d_fd2state[sock].rnode = node;
+			d_fd2state[sock].state = STATE_UDPCLIENT;
+			d_fd2state[sock].fd = sock;
+		} else
+			sock = it->second;
+
+		d_pfds[sock].revents = 0;
+		d_pfds[sock].fd = sock;
+		d_pfds[sock].events = POLLIN;
+
+		if (cmd.size() > 5 + 7 + node.size()) {
+			d_fd2state[sock].odgrams.push_back(cmd.substr(5 + 7 + node.size(), len - 7 - node.size()));	// strip off data part (startes after "%05hu:C:U:S")
+			d_fd2state[sock].ulports.push_back(id);
+
+			d_pfds[sock].events |= POLLOUT;
+		}
+		d_fd2state[sock].time = d_now;
+	}
+
 	return 1;
 }
 

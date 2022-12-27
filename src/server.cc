@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Sebastian Krahmer.
+ * Copyright (C) 2009-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,15 +29,17 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include <map>
 #include <string>
-#include <stdlib.h>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include <iostream>
 #include <sys/time.h>
 #include "session.h"
 #include "server.h"
@@ -45,6 +47,9 @@
 #include "log.h"
 #include "net.h"
 #include "misc.h"
+
+// needed for HAVE_DTLS_LISTEN
+#include "missing.h"
 
 
 using namespace std;
@@ -54,6 +59,7 @@ using namespace crash;
 extern "C" {
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
 }
 
 namespace crash {
@@ -70,8 +76,42 @@ string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!3DES:!ADH:kDHE:RSA
 extern int enable_dh(SSL_CTX *);
 
 
-Server::Server(const std::string &sni)
-	: d_sni(sni)
+map<int, string> dtls_cookies;
+
+int cookie_generate_cb(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len)
+{
+	int fd = 0;
+
+	if ((fd = SSL_get_fd(ssl)) < 0)
+		return 1;
+
+	unsigned char ck[16] = {0};
+	RAND_bytes(ck, sizeof(ck));
+	dtls_cookies.emplace(fd, string(reinterpret_cast<char *>(ck), sizeof(ck)));
+	memcpy(cookie, ck, sizeof(ck));
+	*cookie_len = sizeof(ck);
+	return 1;
+}
+
+
+int cookie_verify_cb(SSL *ssl, const unsigned char *cookie, unsigned int cookie_len)
+{
+	int fd = SSL_get_fd(ssl);
+
+	if (fd < 0 || cookie_len > 16)
+		return 0;
+	if (cookie_len == 0)
+		return 1;
+	auto it = dtls_cookies.find(fd);
+
+	if (it == dtls_cookies.end() || string(reinterpret_cast<const char *>(cookie), cookie_len) != it->second)
+		return 0;
+	return 1;
+}
+
+
+Server::Server(const std::string &t, const std::string &sni)
+	: d_transport(t), d_sni(sni)
 {
 }
 
@@ -90,10 +130,13 @@ int Server::setup()
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
 	OpenSSL_add_all_digests();
-	d_ssl_method = SSLv23_server_method();
+	if (d_transport == "dtls1")
+		d_ssl_method = DTLS_server_method();
+	else
+		d_ssl_method = TLS_server_method();
 
 	if (!d_ssl_method) {
-		d_err = "Server::setup::TLS_server_method:";
+		d_err = "Server::setup::D/TLS_server_method:";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
@@ -116,8 +159,7 @@ int Server::setup()
 		return -1;
 	}
 
-	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
-	op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
+	long op = SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET|SSL_OP_NO_QUERY_MTU;
 
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
@@ -125,6 +167,22 @@ int Server::setup()
 
 	if ((unsigned long)(SSL_CTX_set_options(d_ssl_ctx, op) & op) != (unsigned long)op) {
 		d_err = "Server::setup::SSL_CTX_set_options():";
+		d_err += ERR_error_string(ERR_get_error(), nullptr);
+		return -1;
+	}
+
+	int min_vers = TLS1_3_VERSION;
+
+	if (d_transport == "dtls1") {
+		min_vers = DTLS1_2_VERSION;
+#ifdef HAVE_DTLS_LISTEN
+		SSL_CTX_set_cookie_generate_cb(d_ssl_ctx, cookie_generate_cb);
+		SSL_CTX_set_cookie_verify_cb(d_ssl_ctx, cookie_verify_cb);
+#endif
+	}
+
+	if (SSL_CTX_set_min_proto_version(d_ssl_ctx, min_vers) != 1) {
+		d_err = "Server::setup::SSL_CTX_set_min_proto_version():";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
@@ -143,11 +201,11 @@ int Server::setup()
 	}
 
 	if (config::v6)
-		d_sock = new (nothrow) Socket(PF_INET6);
+		d_sock = new (nothrow) Socket(PF_INET6, d_transport == "tls1" ? SOCK_STREAM : SOCK_DGRAM);
 	else
-		d_sock = new (nothrow) Socket(PF_INET);
+		d_sock = new (nothrow) Socket(PF_INET, d_transport == "tls1" ? SOCK_STREAM : SOCK_DGRAM);
 
-	if (!d_sock) {
+	if (!d_sock || !d_sock->is_good()) {
 		d_err = "Server::setup::new:";
 		return -1;
 	}
@@ -158,25 +216,27 @@ int Server::setup()
 
 int Server::loop()
 {
-	int peer_fd;
+	pid_t pid = 0;
+	int peer_fd = -1;
 	struct sockaddr *from = nullptr;
 	struct sockaddr_in from4;
 	struct sockaddr_in6 from6;
 	socklen_t flen = 0;
 	string msg = "";
-	char dst[128];
+	char dst[128] = {0};
 	time_t now = time(nullptr) - 42, last_accept = 0;
 	unsigned short port = 0;
+	int type = d_transport == "tls1" ? SOCK_STREAM : SOCK_DGRAM;
 
 	if (config::v6) {
-		from = (struct sockaddr *)&from6;
+		from = reinterpret_cast<struct sockaddr *>(&from6);
 		flen = sizeof(from6);
 	} else {
-		from = (struct sockaddr *)&from4;
+		from = reinterpret_cast<struct sockaddr *>(&from4);
 		flen = sizeof(from4);
 	}
 
-	if (!d_sock) {
+	if (!d_sock || !d_sock->is_good()) {
 		d_err = "Server::loop: Server not initialized!";
 		return -1;
 	}
@@ -188,30 +248,61 @@ int Server::loop()
 			d_err += d_sock->why();
 			return -1;
 		}
-		for (;;) {
-			last_accept = now;
-			peer_fd = accept(d_sock_fd, from, &flen);
-			if (peer_fd < 0)
-				continue;
 
-			// brand new D/DoS protection :-)
-			now = time(nullptr);
-			if (now - last_accept <= d_min_time_between_reconnect) {
-				if (config::v6) {
-					if (!is_good_ip(from6.sin6_addr)) {
-						close(peer_fd);
-						continue;
-					}
-				} else {
-					if (!is_good_ip(from4.sin_addr)) {
-						close(peer_fd);
-						continue;
+		for (;;) {
+
+			if (type == SOCK_DGRAM) {
+				char c = 0;
+				last_accept = now;
+				if (recvfrom(d_sock_fd, &c, 1, MSG_PEEK, from, &flen) <= 0)
+					continue;
+
+				now = time(nullptr);
+
+				// TLS Record Layer: ContentType == handshake (22)
+				if (now - last_accept <= d_min_time_between_reconnect || c != 22) {
+					char buf[4096] = {0};
+					recv(d_sock_fd, buf, sizeof(buf), 0);
+					continue;
+				}
+
+				// dup() it, to emulate kind of accept() and we do not need to handle DGRAM differently in child
+				peer_fd = dup(d_sock_fd);
+
+				// in UDP mode, set the address where data is sent from and received from
+				// via read/write and all other datagrams are ignored on receipt
+				if (connect(peer_fd, from, flen) != 0) {
+					msg = "Failed to set default dst of new UDP connection.";
+					syslog().log(msg);
+					close(peer_fd);
+					continue;
+				}
+			} else {
+				last_accept = now;
+				peer_fd = accept(d_sock_fd, from, &flen);
+				if (peer_fd < 0)
+					continue;
+
+				// brand new D/DoS protection :-)
+				now = time(nullptr);
+				if (now - last_accept <= d_min_time_between_reconnect) {
+					if (config::v6) {
+						if (!is_good_ip(from6.sin6_addr)) {
+							close(peer_fd);
+							continue;
+						}
+					} else {
+						if (!is_good_ip(from4.sin_addr)) {
+							close(peer_fd);
+							continue;
+						}
 					}
 				}
 			}
 
-			if (fork() == 0) {
+			if ((pid = fork()) == 0) {
 				close(d_sock_fd);
+
 				if (config::v6) {
 					inet_ntop(AF_INET6, &from6.sin6_addr, dst, sizeof(dst));
 					port = ntohs(from6.sin6_port);
@@ -225,12 +316,13 @@ int Server::loop()
 				msg += dst;
 				syslog().log(msg);
 
-				server_session *s = new (nothrow) server_session(peer_fd, d_ssl_ctx, d_sni);
+				server_session *s = new (nothrow) server_session(peer_fd, d_transport, d_sni);
 				if (!s) {
 					syslog().log("out of memory");
+					close(peer_fd);
 					exit(1);
 				}
-				if (s->handle() < 0) {
+				if (s->handle(d_ssl_ctx) < 0) {
 					string l = "FAIL: ";
 					l += s->why();
 					syslog().log(l);
@@ -239,9 +331,20 @@ int Server::loop()
 				delete s;
 				exit(0);
 			}
+
 			close(peer_fd);
+			if (type == SOCK_STREAM)
+				continue;
+
+			// DGRAM sockets must be closed and re-bound, as the connect() on dup-ed peer_fd also changed state
+			// of d_sock_fd. recycle() handles that.
+			if (d_sock->recycle() < 0 || (d_sock_fd = d_sock->blisten(strtoul(config::port.c_str(), nullptr, 10))) < 0) {
+				d_err = "Server::loop::";
+				d_err += d_sock->why();
+				return -1;
+			}
 		}
-	} else {
+	} else if (d_transport == "tls1") {
 		if (config::local_port.length() > 0)
 			d_sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
 		if ((d_sock_fd = d_sock->connect(config::host, config::port)) < 0) {
@@ -249,10 +352,13 @@ int Server::loop()
 			d_err += d_sock->why();
 			return -1;
 		}
-		server_session *s = new (nothrow) server_session(d_sock_fd, d_ssl_ctx, d_sni);
+		server_session *s = new (nothrow) server_session(d_sock_fd, d_transport, d_sni);
 		if (s)
-			s->handle();
+			s->handle(d_ssl_ctx);
 		delete s;
+	} else {
+		d_err = "Server::loop: Not possible to use active connect as server in UDP mode.";
+		return -1;
 	}
 	return 0;
 }

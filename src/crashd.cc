@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Sebastian Krahmer.
+ * Copyright (C) 2009-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,9 +54,9 @@ using namespace crash;
 
 void help(const char *p)
 {
-	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-H host] [-p port] [-A auth keys]\n"
+	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]\n"
 	       "\t [-k server key-file] [-c server X509 certificate] [-P port] [-S SNI]\n"
-	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-w]\n\n"
+	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-w]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
 	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
@@ -75,6 +75,8 @@ void help(const char *p)
 	       "\t       default is %s\n"
 	       "\t -t -- watch triggerfile for certain message (-m) before connect/listen\n"
 	       "\t -m -- wait with connect/listen until message in file (-t) is seen\n"
+	       "\t -N -- disable TCP/UDP port forwarding\n"
+	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -S -- SNI to hide behind\n\n",
 	       p, config::port.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
 	       config::certfile.c_str());
@@ -155,10 +157,13 @@ int main(int argc, char **argv)
 			printf("%s\r\n\r\n", argv[i]);
 	}
 
-	printf("\ncrypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash\n\n");
+	printf("\ncrypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
-	while ((c = getopt(argc, argv, "6qH:p:A:t:m:k:c:P:g:UweaS:")) != -1) {
+	while ((c = getopt(argc, argv, "6qH:p:A:t:m:k:c:P:g:DUweaS:N")) != -1) {
 		switch (c) {
+		case 'D':
+			config::transport = "dtls1";
+			break;
 		case 'U':
 			config::uid_change = 0;
 			break;
@@ -184,7 +189,8 @@ int main(int argc, char **argv)
 			config::wrap = 1;
 			for (i = 0; i < orig_argc; ++i)
 				memset(orig_argv[i], 0, strlen(orig_argv[i]));
-			strcpy(orig_argv[0], "[nfsd]");
+			strcpy(orig_argv[0], TITLE);
+			setproctitle(TITLE);
 			break;
 		case 'H':
 			config::host = optarg;
@@ -210,10 +216,18 @@ int main(int argc, char **argv)
 		case 'S':
 			config::sni = optarg;
 			break;
+		case 'N':
+			config::no_net = 1;
+			break;
 		default:
 			help(*orig_argv);
 			return 0;
 		}
+	}
+
+	if (config::transport == "dtls1" && config::sni.empty()) {
+		printf("Config error. DTLS option requires SNI. Exiting.\n\n");
+		return 1;
 	}
 
 	struct sigaction sa;
@@ -253,7 +267,8 @@ int main(int argc, char **argv)
 	global::crashd_pid = getpid();
 
 	//chdir("/"); No, we like to have the possibility to find keyfiles etc in "."
-	for (i = 0; i <= sysconf(_SC_OPEN_MAX); ++i)
+	int max = sysconf(_SC_OPEN_MAX);
+	for (i = 0; i <= max; ++i)
 		close(i);
 	open("/dev/null", O_RDWR|O_NOCTTY);
 	dup2(0, 1); dup2(1, 2);
@@ -273,7 +288,7 @@ int main(int argc, char **argv)
 			config::user_keys = config::keyfile;
 	}
 
-	Server *s = new (nothrow) Server(config::sni);
+	Server *s = new (nothrow) Server(config::transport, config::sni);
 	if (!s)
 		return 1;
 

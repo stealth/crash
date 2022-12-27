@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Sebastian Krahmer.
+ * Copyright (C) 2009-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,7 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
 #include <deque>
 #include <time.h>
 #include <netinet/in.h>
@@ -66,13 +67,24 @@ enum {
 	CONNECT_TIME		=	30,
 	UDP_CLOSING_TIME	=	120,
 
-	MSS			=	1420,
-	STDIN_BSIZE		=	MSS,
-	PTY_BSIZE		=	MSS,
+	FDID_MAX		=	65535,		// id field of net cmds encoded as %04hx, so socket fds must not be larger
+
+	// max prefix sizes
+	SEQ_PSIZE		=	28,		// len:C:PN:.... packet numbering prefix for UDP dgrams
+	DATA_PSIZE		=	12,		// len:D:I0: data I/O prefix
+	NODE_PSIZE		=	62,		// len:C:T:N:IP/port/id/ net cmds
+
 	MTU			=	1500,
-	MSG_BSIZE		=	1024,
+	MSS			=	1320,		// 'plain' with room for D/TLS record, transport and network hdrs + options
+	STDIN_BSIZE		=	MSS - SEQ_PSIZE - DATA_PSIZE,
+	PTY_BSIZE		=	MSS - SEQ_PSIZE - DATA_PSIZE,
+	SBUF_BSIZE		=	MSS - SEQ_PSIZE - NODE_PSIZE,
+	MSG_BSIZE		=	MSS,
 	CHUNK_SIZE		=	16638,
-	RBUF_BSIZE		=	20000,
+	UDP_CHUNK_SIZE		=	MSS,
+	TCP_CHUNK_SIZE		=	CHUNK_SIZE,
+	STDOUT_CHUNK_SIZE	=	10*1024*1024,
+	RBUF_BSIZE		=	2*CHUNK_SIZE,
 
 	NETCMD_SEND_ALLOW	=	1,
 
@@ -80,21 +92,34 @@ enum {
 	TRAFFIC_PAD1		=	0x00002,
 	TRAFFIC_PADMAX		=	0x00004,
 	TRAFFIC_PING_IGN	=	0x01000,
-	TRAFFIC_INJECT		=	0x10000
+	TRAFFIC_INJECT		=	0x10000,
 
+	TCP_POLL_TO		=	1000,
+	UDP_POLL_TO		=	450,
+
+	MAX_OVEC_SIZE		=	32
 };
 
 struct state {
 	time_t time{0};
 	int fd{-1};
 	int state{STATE_INVALID};
-	std::string obuf{""}, ibuf{""}, rnode{""};
+	std::string ibuf{""}, rnode{""};
+
+	// TX buffer
+	std::vector<std::string> ovec;
 
 	// must only be pushed/popped in pairs. Each reply datagram needs a port on 127.0.0.1
 	// where it is sent to
 	std::deque<std::string> odgrams;
 	std::deque<uint16_t> ulports;
+
+	std::string::size_type tx_len{0};
 };
+
+
+// at least 64bit in any data model
+using sequence_t = unsigned long long;
 
 
 std::string slen(unsigned short);
@@ -103,9 +128,11 @@ int writen(int fd, const void *buf, size_t len);
 
 int readn(int fd, void *buf, size_t len);
 
-int flush_fd(int, std::string &);
+int flush_fd(int, const std::string &);
 
-void pad_nops(std::string &);
+size_t prepend_seq(sequence_t, std::string &);
+
+size_t pad_nops(std::string &);
 
 std::string ping_packet();
 
@@ -124,6 +151,8 @@ bool is_good_ip(const struct in_addr &);
 bool is_good_ip(const struct in6_addr &);
 
 bool is_nologin(const std::string &);
+
+void setproctitle(const std::string &);
 
 }
 

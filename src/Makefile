@@ -1,38 +1,38 @@
-# make true if you want to build speedport/fritzbox images
-ifeq (true,false)
-# put this tree inside "userapps/opensource" directory
-TOOLCHAIN=/opt/toolchains/uclibc-crosstools
-CROSS_COMPILE = $(TOOLCHAIN)/bin/mips-linux-uclibc-
-CXX=$(CROSS_COMPILE)c++
-CFLAGS=-Wall -O2 -DEMBEDDED -ansi -I../openssl/include
-INC=
-LD=$(CROSS_COMPILE)c++
-LIBS=../openssl/libssl.a ../openssl/libcrypto.a -lutil
-STRIP=$(CROSS_COMPILE)strip
-else
+#
+#
+#
 
-#SSL=/opt/ssl/openssl-3.0.0
+
 INC=
+LIBS=
+CFLAGS=
+DEFS=-DTITLE="\"[kthreadd]\""
+
+
+# comment out if you want DTLSv1_listen() "DoS protection" for OpenSSL-3 or LibreSSL-3
+DEFS+=-DNO_DTLS_LISTEN
+
+#SSL=/opt/ssl/libressl-3.6.1
 
 ifeq ($(shell uname), Linux)
 	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib -Wl,--rpath=$(SSL)/lib64
-	CFLAGS+=-DHAVE_UNIX98
+	DEFS+=-DHAVE_UNIX98
 else ifeq ($(shell uname), Solaris)
 	LIBS+=-lssl -lcrypto -lsocket -lnsl
 else ifeq ($(shell uname), Darwin)
 	SSL=/usr/local/ssl
 	LIBS+=-lssl -lcrypto
-	CFLAGS+=-DHAVE_UNIX98
+	DEFS+=-DHAVE_UNIX98
 else
 	LIBS+=-lssl -lcrypto -lutil
 endif
 
-endif
 
 CXX=c++
 INC+=-I$(SSL)/include
-CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC)
+CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC) $(DEFS)
 LIBS+=-L$(SSL)/lib -L$(SSL)/lib64
+LDFLAGS=-lpthread
 LD=$(CXX)
 STRIP=strip
 
@@ -71,12 +71,12 @@ keys:
 	@echo "to login."
 	@echo
 
-crashc: net.o misc.o crashc.o config.o global.o
-	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o $(LIBS) -o crashc
+crashc: net.o misc.o crashc.o config.o session.o csession.o global.o
+	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o session.o csession.o $(LIBS) $(LDFLAGS) -o crashc
 	$(STRIP) crashc
 
-crashd: server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o
-	$(LD) server.o session.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o $(LIBS) -o crashd
+crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o
+	$(LD) server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o $(LIBS) $(LDFLAGS) -o crashd
 	$(STRIP) crashd
 
 iobox.o: iobox.cc
@@ -87,6 +87,12 @@ server.o: server.cc
 
 session.o: session.cc
 	$(CXX) $(CFLAGS) -c session.cc
+
+ssession.o: ssession.cc
+	$(CXX) $(CFLAGS) -c ssession.cc
+
+csession.o: csession.cc
+	$(CXX) $(CFLAGS) -c csession.cc
 
 net.o: net.cc
 	$(CXX) $(CFLAGS) -c net.cc

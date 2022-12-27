@@ -8,11 +8,11 @@ CRypted Admin SHell
 An SSH alternative featuring:
 
 * IPv6 ready
-* lightweight, straight forward and extensible protocol using TLS 1.2+
-  as transport layer
+* lightweight, straight forward and extensible protocol using TLS 1.3
+  or optionally DTLS 1.2 as transport layer
 * man-in-the-middle safe due to its authentication mechanism
   which involves the servers host key into the auth process
-* built-in traffic blinding against timing and packet-size infoleak attacks
+* built-in traffic blinding against timing and packet-size info-leak attacks
 * not relying on any system auth frameworks such as PAM
 * can be entirely run as user, no need to setup config files
 * passive/active connects on both ends with most flexible
@@ -30,11 +30,14 @@ An SSH alternative featuring:
 * can forward TCP *and* UDP sockets to remote
 * SOCKS4 and SOCKS5 support to forward browser sessions to remote
 * SNI hiding mode
+* can use UDP transport mode with DTLS and added reliability and flow-control
+  layer
 
 Build
 -----
 
-You need to have a reasonable version of *OpenSSL* installed. Inside the cloned git repo:
+Build requires *OpenSSL* version >= `1.1` or `3.0` or compatible *LibreSSL* (`3.6.1` tested).
+Inside the cloned git repo:
 
 ```
 $ make -C src
@@ -65,15 +68,24 @@ or see further instructions in this document. If you want to use _ephemeral keyi
 $ cd src; ./newdh
 ```
 
-before `make` in order to generate DH parameters before the build.
+before `make` in order to generate DH parameters before the build. Thats not strictly necessary
+as of TLS 1.3, since the Kex will most likely chose one of the ECDH variants, but if you customize
+your setup, it is recommended to generate your own DH params.
 
 OpenSSL3 builds
 ---------------
 
-The *OpenSSL 3* API is quite different from the *OpenSSL-1.0* and 1.1 API. In order to make
+The *OpenSSL 3* API is quite different from the *OpenSSL-1.1* API. In order to make
 use of *OpenSSL 3*, you have to edit `Makefile` and `newdh` to reflect your path setup
-for your *OpenSSL* install. Invoking `newdh` is mandatory, unlike for the 1.x builds. After
-that you just do `make` and everything should be the same as with 1.x.
+for your *OpenSSL* install. Invoking `newdh` is mandatory, unlike for the 1.1 builds. After
+that you just do `make` and everything should be the same as with 1.1.
+
+*proudly sponsored by:*
+<p align="center">
+<a href="https://github.com/c-skills/welcome">
+<img src="https://github.com/c-skills/welcome/blob/master/logo.jpg"/>
+</a>
+</p>
 
 
 Run
@@ -86,13 +98,13 @@ runtime switches:
 ```
 stealth@linux ~> ./crashd -h
 
-crypted admin shell (C) 2021 Sebastian Krahmer https://github.com/stealth/crash
 
-./crashd: invalid option -- 'h'
+crypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash
 
-Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
+
+Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
 	 [-k server key-file] [-c server X509 certificate] [-P port] [-S SNI]
-	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs]
+	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N ] [-w]
 
 	 -a -- always login if authenticated, despite false/nologin shells
 	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
@@ -112,11 +124,14 @@ Usage:	./crashd [-U] [-q] [-a] [-6] [-w] [-H host] [-p port] [-A auth keys]
 	       default is ./serverkey.pub
 	 -t -- watch triggerfile for certain message (-m) before connect/listen
 	 -m -- wait with connect/listen until message in file (-t) is seen
-         -S -- SNI to hide behind
+	 -N -- disable TCP/UDP port forwarding
+	 -D -- use DTLS transport (requires -S)
+	 -S -- SNI to hide behind
+
 ```
 
 Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
-skip *setuid()* calls, effectively being able to run as user. In this case, it only accepts
+skip `setuid()` calls, effectively being able to run as user. In this case, it only accepts
 logins to that user then by checking login name's `uid` against current `euid`.
 Both, *crashc* and *crashd* can use active and passive connects. Whenever
 a host-argument `-H` is given, it uses active connect to this host
@@ -124,10 +139,10 @@ and the belonging port `-p`. If `-H` is given, it also accepts
 `-P` which specifies the local port it has to bind to before doing active connect.
 Without `-H` it will listen for incoming connects. This way, from TCP view client
 and server role may be reversed, while still having `crashd` as the shell server.
-If `-w` is used it forks itself as **[nfsd]** and tries to wrap around its
+If `-w` is used it forks itself as **[kthreadd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons. As `-w` is overwriting main()'s `argv` array,
 it must appear last in the option list, otherwise option processing will not work
-correctly.
+correctly. You can set the process name as `TITLE` def inside the `Makefile`.
 
 For testing, when you did `make keys` (next section), you can just run
 
@@ -210,7 +225,7 @@ inside your home directory. If the pathname does not end with a slash, it is tre
 a filename instead of a directory. If a cache directory is used instead of an
 filename, each hostkey is expected to be found inside the folder as of the name `HK_$HOST:$PORT`
 where `$HOST` is the `-H` argument and `$PORT` the `-p` argument. If using `-v`
-the server hostkey will be printed on stdout and may be pasted to the cache folder
+the server hostkey will be printed on `stderr` and may be pasted to the cache folder
 into the `HK_$HOST:$PORT` file.
 
 Hostkey checking may be suppressed by using `-K none`.
@@ -312,6 +327,24 @@ SOCKS5 is not usable with *chrome*. But you can use *chrome* with *SOCKS4*, sinc
 protocol only supports IPv4 addresses, not domain names.
 
 
+DTLS transport
+--------------
+
+*crash* allows to use all of its trickery above also on a DTLS 1.2 transport layer based
+on UDP. I have added basic flow control and reliability, so you can even xfer files and use
+port forwarding as with TLS 1.3. The reason for adding DTLS is that some countries have
+TCP egress filters that only allow incoming connections. It is harder for censors to tell
+which UDP packets establish an outgoing connection, as there is nothing like a "connection"
+with UDP. With DTLS sessions, which are established by the `-D` switch on both sides, a SNI
+is mandatory.
+When forwarding UDP ports on DTLS sessions, make sure you will not send UDP payloads larger than
+1320 bytes across the sockets, as it is necessary in UDP case to keep enough room for headers
+and record layer without the need to fragment the packet, as DTLS honors packet boundaries
+(there is nothing like a stream as in TCP, just datagrams).
+DTLS mode is still experimental (although working stable) and will switch to DTLS 1.3 as soon
+as it is implemented widely (DTLS 1.3 RFC was just finished 2022).
+
+
 Mitigating traffic analysis
 ---------------------------
 
@@ -324,26 +357,28 @@ Completely mitigating traffic analysis for a capable (global) observer is very h
 It would require many crash users so to sink all individual packets in a swarm and
 make it impossible to find patterns that could be used to track individual users across
 packet mixes. It would also require a fixed packet size for *all* packets as well as a
-constant delay between the sends to make all connections look equal. Even then, theres
+constant delay between the sends to make all connections look equal. Even then, there's
 still the problem of the overall amount of traffic sent that may be measured and used
 to track individuals. As having constant size and delays would make the connection
 feel slow or even unusable, *crash* lets you choose between traffic policies which are
 controlled by `-R <value>`. *Value* is an integer with the following meaning:
 
 * 0: disable all padding of payloads and don't inject random traffic. The pure feeling!
-* 1: pad payload to the next 256, 512, 1024 or 1420 byte boundary, no injects (default)
-* 2: pad payload to the next 256, 512, 1024 or 1420 byte boundary, random injects client side
-* 3: pad payload to the next 256, 512, 1024 or 1420 byte boundary, random injects with server
+* 1: pad payload to the next 256, 512, 1024 or 1320 byte boundary, no injects (default)
+* 2: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects client side
+* 3: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects with server
   responses
-* 4: pad payload to 1420 byte boundary, no injects
-* 5: pad payload to 1420 byte boundary, random injects client side
-* 6: pad payload to 1420 byte boundary, random injects with server responses
+* 4: pad payload to 1320 byte boundary, no injects
+* 5: pad payload to 1320 byte boundary, random injects client side
+* 6: pad payload to 1320 byte boundary, random injects with server responses
 
-1420 is an often seen TCP MSS. The values were chosen in a way so that sent data fits most
+1320 is crashds internally used MSS. The values were chosen in a way so that sent data fits most
 likely into a single packet. Note however that these are the packet sizes (plus the TLS record size)
-as it is passed to the TCP stack. TCP will decide itself how it will send the segements. There is
+as it is passed to the TCP stack. TCP will decide itself how it will send the segments. There is
 no way to enforce 'TCP packet sizes', but this does not matter as the deps to the actual payload
 size is already blurred.
+
+In DTLS mode there are always ping packets in order to implement synchronization and flow control.
 
 If you live in a country with restrictive egress filtering, it may be helpful to test how long
 connections can survive. Note that due to `-4` and `-U` which allows to proxy TCP *and* UDP (DNS)
@@ -357,8 +392,8 @@ detect and classify SSH traffic by behavioral analysis.
 Hiding by SNI
 -------------
 
-By default, the `crashd` whill show a banner upon connect to tell the peer major and minor version
-numbers. Censorship countries might block addresses wich show banners they dislike. To combat this,
+By default, the `crashd` will show a banner upon connect to tell the peer major and minor version
+numbers. Censorship countries might block addresses which show banners they dislike. To combat this,
 *crash* allows for a TLS-only mode that is indistinguishable from a HTTPS session. Just start
 `crashd` with `-S` and give a semi-secret name (Server Name Indicator, SNI). Only clients that also
 use the correct `-S` parameter will reach the gate for authentication at all. Other TLS sessions
@@ -366,12 +401,12 @@ will just be rejected. *Note that the SNI travels the network in plain-text and 
 for authentication.* The only reason for SNI hiding is to hide the *crash* banner from probing/crawling.
 You may also use SNI proxies such as [sshttp](https://github.com/stealth/sshttp) to hide *crash* even
 deeper and to forward all non-correct SNI connects to some web-site. This way you may hide your server
-behind neutral web-sites from agressively probing/blocking censors.
+behind neutral web-sites from aggressively probing/blocking censors.
 
 In order for probing to not reveal that you are running *crash* by checking the X509 certificate
 details, you should use reasonable values for *Country Name*, *City* etc. when asked for it during
 the `make keys` process. For instance it would make no sense to setup a pro-regime web-site
-to hide behind and enter anti-regime values for the X509 specific namings.
+to hide behind and enter anti-regime values for the X509 specific naming.
 
 
 File up/download
@@ -395,86 +430,10 @@ the verbose output to the `local.file`. For `-c` commands, *crash* will forward 
 during the xfer.
 
 
-cross-build for speedport/fritzbox DSL routers
-----------------------------------------------
-
-This section is just here for historical reasons. It's from the early
-2000's when hacking DSL modems was a widespread hobby.
-
-In Germany, these devices are quite common and support open build
-environment/SDK since the firmware is based on Linux and available
-in source. Download/unpack the SDK/tar-ball and the MIPS tool-chain. I assume you
-are familiar with building router images for these devices. The openssl
-package for the speedport **W-500V** I tested has version 0.9.7 and I had
-to build it by hand before, so the references to the *libssl.a*
-inside crash Makefile are valid. On the system I tested (500V)
-I had to make it static, since dynamic openssl library requires *libdl*
-which was not on the device. Building a firmware image often
-calls strip on the user binaries, so take care it doesn't
-strip off the embedded keys if using `-e`.
-
-
-Then, inside  `userapps/opensource/` directory, unpack the crash tar-ball,
-edit the `Makefile` to match "true" at the first `ifeq()` and then you are able
-to just "make crashd" to build crashd for the DSL router.
-
-You can now put it into the firmware image, make it loaded at boot and you
-are able to admin your DSL box from remote via full protected crypto shell
-and without stupid web interface.
-
-
-Here's how I connect to a 500V DSL modem running crashd inside:
-
-```
-stealth@linux ~> ./crashc -l root -H 192.168.2.1 -K .crash/HK_127.0.0.1\:2222 -v  \
-                          -i privkey.pem -c '/bin/sh -i'
-crash: starting crypted administration shell
-crash: connecting to 192.168.2.1:2222 ...
-Enter PEM pass phrase:
-crash:{
------BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA4PKEDfrj1v1RlK307j1o
-JX9aUuadp3KjGqs2gpoxYTuYf8oBh+1qhwbsH5wC1oQ4HerlIAfLFfUL0+yjy1BO
-jNW/4sCo3QSxByRC9DORmfADrxJYkWjyC+cgdXCRaudYBLsz4oIDbg6B8Gtzma8c
-ifFPUuSfEoLMRlQOSBIr15WzjS9/wIJfU+D0maJAFRySvVhcRQEbQZ5uuhLnmf4R
-zEEiVV+HU79AfhuaKjs1gnTCZwj/dUmsD2zNjHuU6bZpjiQlQdkXLKe2wTvvYFQL
-pbmx/XEapoW+tes9pbGgkFIs0jQLz/xYB07luUy46teVAVyB70R7l/WDyFpocPwW
-seLNINDUKTvN6vo4UJD9tg1xhClim+P8Jnkyh5X5MqSdXwYC4N/FQsGs223jtxY2
-XvQNPBR06d8HJu66GCDSTy7jKKARQ3c3Odq87JDOquUntR1pg26Dj3lOHWVQpuof
-7jZ6vLyivpnh4JcdBgGTkzC+Ua0VE1tlokl58+FjhkIbeijD6FK+xcUNaylRo9YM
-TrHjBnCi9FIb85WfBo1pj+basKAM85+BkFX3sLC+HR62CL1qJKue7qDBMJbK4INx
-ZvoDpdJyBRZXLx+lGisasT3zgNDjJAjSWYn5bY1FfTMBZbvhZyN2/5Uxe85VicUV
-8NS0w2TCghjgA0B+hiln1mMCAwEAAQ==
------END PUBLIC KEY-----
-crash:}
-Using fallback suid method
-Using fallback suid method
-
-
-BusyBox v1.00 (2008.06.03-09:17+0000) Built-in shell (msh)
-Enter 'help' for a list of built-in commands.
-
-# ps aux
- [...]
-  206 root       1712 S   httpd
-  210 root        232 S   smdog 
-  520 root       1160 S   /bin/crashd -A /var/pubkey.pem 
-  546 root       1464 S   /bin/crashd -A /var/pubkey.pem 
-  561 root        352 S   /bin/sh -c /bin/sh -i 
-  562 root        396 S   /bin/sh -i 
-  715 root        340 R   ps aux 
-#
-```
-
-Keep in mind that on embedded systems, UNIX98 pty's are often not available and
-there are only a limited number of BSD pty's (2 or so) so you cant login a hundred
-times simultaneously.
-
-
 DoS mitigation
 --------------
 
-_crashd_ includes some sort of D/DoS protection. Only one connection per second
+*crashd* includes some sort of D/DoS protection. Only one connection per second
 is allowed per IP, except if the IP is listed (or the network it belongs to)
 in a good-IP file given with -g at startup.
 Per default no good IPs are assigned. Network-address-goodness only works with

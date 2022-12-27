@@ -2,6 +2,7 @@
 #define crash_missing_h
 
 extern "C" {
+#include <openssl/opensslv.h>
 #include <openssl/crypto.h>
 }
 
@@ -14,6 +15,13 @@ extern "C" {
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 #define EVP_PKEY_cmp EVP_PKEY_eq
 #endif
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L || LIBRESSL_VERSION_NUMBER >= 0x30000000L
+#ifndef NO_DTLS_LISTEN
+#define HAVE_DTLS_LISTEN
+#endif
+#endif
+
 
 #endif
 

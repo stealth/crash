@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2021 Sebastian Krahmer.
+ * Copyright (C) 2014-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

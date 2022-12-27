@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Sebastian Krahmer.
+ * Copyright (C) 2009-2022 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,10 +32,10 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
-#include <stdlib.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <map>
@@ -47,6 +47,10 @@
 #include "config.h"
 #include "misc.h"
 #include "global.h"
+
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 
 using namespace std;
@@ -79,11 +83,11 @@ int readn(int fd, void *buf, size_t len)
 
 int writen(int fd, const void *buf, size_t len)
 {
-	int o = 0, n;
-	char *ptr = (char*)buf;
+	int o = 0, n = 0;
+	const char *ptr = reinterpret_cast<const char *>(buf);
 
 	while (len > 0) {
-		if ((n = write(fd, ptr+o, len)) < 0)
+		if ((n = write(fd, ptr + o, len)) <= 0)
 			return n;
 		len -= n;
 		o += n;
@@ -92,7 +96,7 @@ int writen(int fd, const void *buf, size_t len)
 }
 
 
-int flush_fd(int fd, string &buf)
+int flush_fd(int fd, const string &buf)
 {
 	string::size_type bs = buf.size();
 
@@ -100,33 +104,51 @@ int flush_fd(int fd, string &buf)
 		return 0;
 
 	ssize_t n = 0;
+	size_t idx = 0;
 	do {
 		size_t wn = bs > 0x1000 ? 0x1000 : bs;
-		if ((n = write(fd, buf.c_str(), wn)) <= 0)
+		if ((n = write(fd, buf.c_str() + idx, wn)) <= 0)
 			return n;
-		buf.erase(0, n);
-	} while ((bs = buf.size()) > 0);
+		idx += n;
+		bs -= n;
+	} while (bs > 0);
 
-	return 0;
+	return idx;
 }
 
 
-void pad_nops(string &s)
+size_t prepend_seq(sequence_t n, string &s)
+{
+	size_t r = 0;
+
+	// no sequencing for Re-sends and SQ packets.
+	if (s.find("D:") == 6 || s.find("C:WS:") == 6 || s.find("C:T:") == 6 ||
+	    s.find("C:U:") == 6 || s.find("C:CL") == 6 || s.find("C:PP") == 6) {
+		char buf[32] = {0};
+		snprintf(buf, sizeof(buf) - 1, "%05hu:C:PN:%016llx:", 6 + 17 + ((unsigned short)(s.size() & 0xffff)), n);
+		s.insert(0, buf);
+		r = 1;
+	}
+
+	return r;
+}
+
+
+size_t pad_nops(string &s)
 {
 
 	if (config::traffic_flags & TRAFFIC_NOPAD)
-		return;
+		return 0;
 
 	const uint8_t nop_fix = 5 + 6;	// %05hu:C:NO:
 
 	const auto l = s.size();
 	int pads = 0;
 
-	// 1420 is most likely the TCP MSS and we substract something for TLS record size
-	enum { PMAX_SIZE = 1420 - 64 };
+	enum { PMAX_SIZE = MSS };
 
 	if (l + nop_fix >= PMAX_SIZE)
-		return;
+		return 0;
 
 	char zeros[PMAX_SIZE] = {0};
 
@@ -144,12 +166,14 @@ void pad_nops(string &s)
 	}
 
 	// Huh?
-	if (pads < 0 || pads > PMAX_SIZE)
-		return;
+	if (pads <= 0 || 5 + 6 + pads >= PMAX_SIZE)
+		return 0;
 
 	s += slen(6 + pads);
 	s += ":C:NO:";
 	s += string(zeros, pads);
+
+	return 5 + 6 + pads;
 }
 
 
@@ -306,6 +330,16 @@ bool is_nologin(const string &shell)
 	if (shell.find("nologin") != string::npos)
 		return 1;
 	return 0;
+}
+
+
+void setproctitle(const string &proc)
+{
+#ifndef __linux__
+	setproctitle("%s", proc.c_str());
+#else
+	prctl(PR_SET_NAME, proc.c_str(), 0, 0, 0);
+#endif
 }
 
 }
