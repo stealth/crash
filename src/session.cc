@@ -276,7 +276,7 @@ int session::tx_add_sq(int fd)
 		return 0;
 
 	char buf[64] = {0};
-	snprintf(buf, sizeof(buf) - 1, "%05hu:C:SQ:%016llx:%016llx:", 6 + 34, d_flow.rx_sequence, d_flow.tx_sequence);
+	snprintf(buf, sizeof(buf) - 1, "%05hu:C:SQ:%016llx:%016llx:", (unsigned short)(6 + 34), d_flow.rx_sequence, d_flow.tx_sequence);
 
 	tx_add(fd, buf);
 	d_pfds[fd].events |= POLLOUT;

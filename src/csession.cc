@@ -844,7 +844,7 @@ int client_session::handle()
 					// append ID part of host/port/id/ header. We use the accepted sock fd
 					// as ID, as this is unique and identifies the TCP connection
 					char id[16] = {0};
-					snprintf(id, sizeof(id) - 1, "%04hx/", afd);
+					snprintf(id, sizeof(id) - 1, "%04hx/", (unsigned short)afd);	// FDID_MAX guarantees type short
 
 					d_pfds[afd].fd = afd;
 					d_pfds[afd].events = 0;	// dont accept data until remote peer established proxy conn
@@ -930,7 +930,7 @@ int client_session::handle()
 					// Now that we know where connection is going to, we can build
 					// IP/port/ID header
 					char hdr[256] = {0};
-					snprintf(hdr, sizeof(hdr) - 1, "%s/%04hx/%04hx/", dst, rport, i);
+					snprintf(hdr, sizeof(hdr) - 1, "%s/%04hx/%04hx/", dst, rport, (unsigned short)i);
 
 					d_fd2state[i].rnode = hdr;
 					d_fd2state[i].state = STATE_CONNECT;
@@ -995,7 +995,7 @@ int client_session::handle()
 					// Now that we know where connection is going to, we can build
 					// IP/port/ID header
 					char hdr[256] = {0};
-					snprintf(hdr, sizeof(hdr) - 1, "%s/%04hx/%04hx/", dst, rport, i);
+					snprintf(hdr, sizeof(hdr) - 1, "%s/%04hx/%04hx/", dst, rport, (unsigned short)i);
 
 					d_fd2state[i].rnode = hdr;
 					d_fd2state[i].state = STATE_CONNECT;
