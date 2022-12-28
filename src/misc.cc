@@ -336,7 +336,7 @@ bool is_nologin(const string &shell)
 void setproctitle(const string &proc)
 {
 #ifndef __linux__
-	setproctitle("%s", proc.c_str());
+	::setproctitle("%s", proc.c_str());
 #else
 	prctl(PR_SET_NAME, proc.c_str(), 0, 0, 0);
 #endif
