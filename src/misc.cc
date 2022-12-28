@@ -125,7 +125,7 @@ size_t prepend_seq(sequence_t n, string &s)
 	if (s.find("D:") == 6 || s.find("C:WS:") == 6 || s.find("C:T:") == 6 ||
 	    s.find("C:U:") == 6 || s.find("C:CL") == 6 || s.find("C:PP") == 6) {
 		char buf[32] = {0};
-		snprintf(buf, sizeof(buf) - 1, "%05hu:C:PN:%016llx:", 6 + 17 + ((unsigned short)(s.size() & 0xffff)), n);
+		snprintf(buf, sizeof(buf) - 1, "%05hu:C:PN:%016llx:", (unsigned short)(6 + 17) + ((unsigned short)(s.size() & 0xffff)), n);
 		s.insert(0, buf);
 		r = 1;
 	}
