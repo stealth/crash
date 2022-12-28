@@ -761,7 +761,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 					sequence_t seq = 0;
 					auto sv = tx_string(i, seq, bk_str, d_chunk_size);
 
-					// keep sequenced packets for possible resend requests. 'seq' equals d_tx_sequence
+					// keep sequenced packets for possible resend requests. 'seq' equals d_flow.tx_sequence
 					if (d_type == SOCK_DGRAM && seq != 0)
 						d_tx_map[d_flow.tx_sequence++] = bk_str;
 
