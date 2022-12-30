@@ -335,9 +335,10 @@ bool is_nologin(const string &shell)
 
 void setproctitle(const string &proc)
 {
-#ifndef __linux__
+#if !defined __linux__ && !defined __APPLE__
 	::setproctitle("%s", proc.c_str());
-#else
+#endif
+#if defined __linux__
 	prctl(PR_SET_NAME, proc.c_str(), 0, 0, 0);
 #endif
 }

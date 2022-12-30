@@ -20,7 +20,7 @@ ifeq ($(shell uname), Linux)
 else ifeq ($(shell uname), Solaris)
 	LIBS+=-lssl -lcrypto -lsocket -lnsl
 else ifeq ($(shell uname), Darwin)
-	SSL=/usr/local/ssl
+	SSL=/usr/local/opt/openssl\@1.1
 	LIBS+=-lssl -lcrypto
 	DEFS+=-DHAVE_UNIX98
 else

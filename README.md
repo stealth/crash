@@ -48,10 +48,10 @@ On BSD systems you need to install *GNU make* and type `gmake` instead.
 If you have a particular *OpenSSL* or *LibreSSL* setup, check the `Makefile` and
 set the appropriate `$SSL` variable. *crash* builds also nicely with *LibreSSL* and *BoringSSL*.
 
-For embedded systems, please see at the end of this document.
-
 For Android, edit the `Makefile.android` or `Makefile.android.aarch64` to reflect
 your NDK and *BoringSSL* install and use these. The build was tested with `android-ndk-r17b`.
+
+On OSX you want to install *OpenSSL* via `brew install openssl@1.1` or by hand before `make`.
 
 *crash* was successfully tested on *Linux, FreeBSD, NetBSD, OpenSolaris, OSX and Android*.
 
