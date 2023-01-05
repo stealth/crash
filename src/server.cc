@@ -118,8 +118,9 @@ Server::Server(const std::string &t, const std::string &sni)
 
 Server::~Server()
 {
-	if (d_ssl_ctx)
-		SSL_CTX_free(d_ssl_ctx);
+	// OpenSSL bug workaround
+	//if (d_ssl_ctx)
+	//	SSL_CTX_free(d_ssl_ctx);
 	delete d_sock;
 }
 
