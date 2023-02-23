@@ -5,14 +5,14 @@
 
 INC=
 LIBS=
-CFLAGS=
+CXXFLAGS=
 DEFS=-DTITLE="\"[kthreadd]\""
 
 
 # comment out if you want DTLSv1_listen() "DoS protection" for OpenSSL-3 or LibreSSL-3
 DEFS+=-DNO_DTLS_LISTEN
 
-#SSL=/opt/ssl/libressl-3.6.1
+#SSL=/opt/ssl/libressl-3.7.0
 
 ifeq ($(shell uname), Linux)
 	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib -Wl,--rpath=$(SSL)/lib64
@@ -28,9 +28,11 @@ else
 endif
 
 
-CXX=c++
+CXX?=c++
+CXXSTD?=c++11
 INC+=-I$(SSL)/include
-CFLAGS+=-Wall -O2 -std=c++11 -pedantic $(INC) $(DEFS)
+CXXFLAGS+=-Wall -O2 -std=$(CXXSTD) -pedantic $(INC) $(DEFS)
+
 LIBS+=-L$(SSL)/lib -L$(SSL)/lib64
 LDFLAGS=-lpthread
 LD=$(CXX)
@@ -80,47 +82,47 @@ crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98
 	$(STRIP) crashd
 
 iobox.o: iobox.cc
-	$(CXX) $(CFLAGS) -c iobox.cc
+	$(CXX) $(CXXFLAGS) -c iobox.cc
 
 server.o: server.cc
-	$(CXX) $(CFLAGS) -c server.cc
+	$(CXX) $(CXXFLAGS) -c server.cc
 
 session.o: session.cc
-	$(CXX) $(CFLAGS) -c session.cc
+	$(CXX) $(CXXFLAGS) -c session.cc
 
 ssession.o: ssession.cc
-	$(CXX) $(CFLAGS) -c ssession.cc
+	$(CXX) $(CXXFLAGS) -c ssession.cc
 
 csession.o: csession.cc
-	$(CXX) $(CFLAGS) -c csession.cc
+	$(CXX) $(CXXFLAGS) -c csession.cc
 
 net.o: net.cc
-	$(CXX) $(CFLAGS) -c net.cc
+	$(CXX) $(CXXFLAGS) -c net.cc
 
 misc.o: misc.cc
-	$(CXX) $(CFLAGS) -c misc.cc
+	$(CXX) $(CXXFLAGS) -c misc.cc
 
 config.o: config.cc
-	$(CXX) $(CFLAGS) -c config.cc
+	$(CXX) $(CXXFLAGS) -c config.cc
 
 pty.o: pty.cc
-	$(CXX) $(CFLAGS) -c pty.cc
+	$(CXX) $(CXXFLAGS) -c pty.cc
 
 pty98.o: pty98.cc
-	$(CXX) $(CFLAGS) -c pty98.cc
+	$(CXX) $(CXXFLAGS) -c pty98.cc
 
 global.o: global.cc
-	$(CXX) $(CFLAGS) -c global.cc
+	$(CXX) $(CXXFLAGS) -c global.cc
 
 log.o: log.cc
-	$(CXX) $(CFLAGS) -c log.cc
+	$(CXX) $(CXXFLAGS) -c log.cc
 
 crashd.o: crashd.cc
-	$(CXX) $(CFLAGS) -c crashd.cc
+	$(CXX) $(CXXFLAGS) -c crashd.cc
 
 crashc.o: crashc.cc
-	$(CXX) $(CFLAGS) -c crashc.cc
+	$(CXX) $(CXXFLAGS) -c crashc.cc
 
 dh.o: dh.cc dh2048.cc
-	$(CXX) $(CFLAGS) -c dh.cc
+	$(CXX) $(CXXFLAGS) -c dh.cc
 

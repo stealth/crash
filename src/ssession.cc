@@ -483,8 +483,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 	l += "'";
 	syslog().log(l);
 
-	// only on a pipe in non-pty mode, unused for other cases
-	if ((pipe_child = fork()) == 0) {
+	// only on a pipe in non-pty mode, unused for other cases. Assignment is not compound
+	// with if() check since in C++20 you will get deprecate warning for compound volatile statements
+	pipe_child = fork();
+	if (pipe_child == 0) {
 		long mfd = sysconf(_SC_OPEN_MAX);
 		for (long i = 0; i <= mfd; ++i) {
 			if (i != d_iob.slave0() && i != d_iob.slave1() && i != d_iob.slave2())

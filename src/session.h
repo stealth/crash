@@ -215,18 +215,18 @@ class server_session : public session {
 
 	std::string d_banner{"1000 crashd-3.0000 OK\r\n"};	// keep in sync with d_major and d_minor
 
-#if defined LIBRESSL_VERSION_NUMBER || defined BORINGSSL_API_VERSION
-	char d_dlisten_param[128]{0};
-#else
-	BIO_ADDR *d_dlisten_param{nullptr};
-#endif
-
 	iobox d_iob;
 
 	uid_t d_final_uid{0xffff};
 	char d_peer_ip[64]{0};
 
 protected:
+
+#if defined LIBRESSL_VERSION_NUMBER || defined BORINGSSL_API_VERSION
+	char d_dlisten_param[128]{0};
+#else
+	BIO_ADDR *d_dlisten_param{nullptr};
+#endif
 
 	virtual int authenticate() override;
 
