@@ -53,13 +53,13 @@ than me, but for me it resolves to `185.60.217.54` or `2a03:2880:f21c:81c6:face:
 Given that you manage to establish a connection to your VPS in the steps before, you do:
 
 ```
-$ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[185.60.217.54]:5222 -l user -i authkey.priv -v`
+$ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[185.60.217.54]:5222 -l user -i authkey.priv -v
 ```
 
 or
 
 ```
- $ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[2a03:2880:f21c:81c6:face:b00c:0:7260]:5222 -l user -i authkey.priv -v`
+ $ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[2a03:2880:f21c:81c6:face:b00c:0:7260]:5222 -l user -i authkey.priv -v
 
 ```
 
