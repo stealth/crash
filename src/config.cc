@@ -11,7 +11,7 @@ namespace config
 	uint32_t traffic_flags = crash::TRAFFIC_PAD1;
 
 	std::string keyfile = "./serverkey.priv", certfile = "./serverkey.pub";
-	std::string host = "", port = "2222", local_port = "", sni = "";
+	std::string host = "", port = "2222", local_port = "", local_proxy_ip = "127.0.0.1", sni = "";
 
 	std::string transport = "tls1";
 

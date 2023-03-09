@@ -51,7 +51,7 @@ using namespace crash;
 void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
-	       "\t [-K server key/s] [-c command] [-S SNI] [-D] [-U lport:[ip]:rport]\n"
+	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R level] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
@@ -63,6 +63,7 @@ void help(const char *p)
 	       "\t       absolute path of known-hosts file otherwise;\n"
 	       "\t       'none' to disable; default is %s\n"
 	       "\t -c -- command to execute on remote host\n"
+	       "\t -X -- run proxy on this IP (default 127.0.0.1)\n"
 	       "\t -U -- forward UDP port lport to ip:rport on remote site\n"
 	       "\t -T -- forward TCP port lport to ip:rport on remote site\n"
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
@@ -91,7 +92,7 @@ int main(int argc, char **argv)
 	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0};
 	uint16_t rport = 0;
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:l:i:c:R:T:U:5:4:S:D")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:l:i:c:R:T:U:5:4:S:D")) != -1) {
 		switch (c) {
 		case 'D':
 			config::transport = "dtls1";
@@ -107,6 +108,9 @@ int main(int argc, char **argv)
 			break;
 		case 'P':
 			config::local_port = optarg;
+			break;
+		case 'X':
+			config::local_proxy_ip = optarg;
 			break;
 		case 'K':
 			config::server_keys = optarg;
@@ -145,14 +149,14 @@ int main(int argc, char **argv)
 		case '4':
 			if (config::socks4_fd == -1) {
 				config::socks4_port = strtoul(optarg, nullptr, 10);
-				if ((config::socks4_fd = tcp_listen("127.0.0.1", optarg)) > 0)
+				if ((config::socks4_fd = tcp_listen(config::local_proxy_ip, optarg)) > 0)
 					ostr += "crashc: set up SOCKS4 port on " + string(optarg) + "\n";
 			}
 			break;
 		case '5':
 			if (config::socks5_fd == -1) {
 				config::socks5_port = strtoul(optarg, nullptr, 10);
-				if ((config::socks5_fd = tcp_listen("127.0.0.1", optarg)) > 0)
+				if ((config::socks5_fd = tcp_listen(config::local_proxy_ip, optarg)) > 0)
 					ostr += "crashc: set up SOCKS5 port on " + string(optarg) + "\n";
 			}
 			break;

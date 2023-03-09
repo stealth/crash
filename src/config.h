@@ -12,7 +12,7 @@ namespace config
 
 	extern uint32_t traffic_flags;
 
-	extern std::string keyfile, certfile, host, port, local_port, sni, transport;
+	extern std::string keyfile, certfile, host, port, local_port, local_proxy_ip, sni, transport;
 	extern std::string server_keys, user_keys, user, cmd;
 
 	extern std::string tfile, tmsg, good_ip_file;

@@ -548,7 +548,7 @@ int client_session::handle()
 		global::window_size_changed = 1;
 
 	for (auto it = config::tcp_listens.begin(); it != config::tcp_listens.end(); ++it) {
-		if ((r = tcp_listen("127.0.0.1", it->first)) < 0)
+		if ((r = tcp_listen(config::local_proxy_ip, it->first)) < 0)
 			continue;
 		d_pfds[r].fd = r;
 		d_pfds[r].events = POLLIN;
@@ -559,7 +559,7 @@ int client_session::handle()
 	}
 
 	for (auto it = config::udp_listens.begin(); it != config::udp_listens.end(); ++it) {
-		if ((r = udp_listen("127.0.0.1", it->first)) < 0)
+		if ((r = udp_listen(config::local_proxy_ip, it->first)) < 0)
 			continue;
 		d_pfds[r].fd = r;
 		d_pfds[r].events = POLLIN;

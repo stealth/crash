@@ -252,6 +252,15 @@ confidential and untampered session when you see this token upon login;
 even if you omit the host-key check.
 
 
+Term setup
+----------
+
+As *crashc* is not transfering env vars to the remote side for a reason, keep in mind
+that certain stuff is unset, such as `$TERM`. I.e. if you want to run an editor on the remote
+shell and started *crashc* from within an xterm, you have to `TERM=xterm vi file` in order
+to have a useful editing session. Likewise for other programs that you expect to work and
+require specific environment setup.
+
 CGI
 ---
 
@@ -311,6 +320,9 @@ you may use the same `-U` and `-T` parameters as known from *psc* and which are 
 to those of *OpenSSH's* `-L` parameter. It will bind to `lport` and will forward connections
 to `[ip]:rport`, initiating the connection from the remote host. The same works for UDP
 packets, which is not possible with SSH.
+
+If you are interested in messenger proxy setups in copland countries, you can check `contrib`
+folder.
 
 
 SOCKS4 and SOCKS5 support
