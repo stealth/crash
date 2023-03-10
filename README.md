@@ -29,6 +29,8 @@ An SSH alternative featuring:
 * supports Perfect Forward Secrecy via DH Kex
 * can forward TCP *and* UDP sockets to remote
 * SOCKS4 and SOCKS5 support to forward browser sessions to remote
+* messenger proxy support
+* proxying based on SNI
 * SNI hiding mode
 * can use UDP transport mode with DTLS and added reliability and flow-control
   layer
@@ -101,33 +103,31 @@ stealth@linux ~> ./crashd -h
 
 crypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash
 
+Usage:  ./crashc [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]
+         [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]
+         [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]
+         [-R level] <-l user>
 
-Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
-	 [-k server key-file] [-c server X509 certificate] [-P port] [-S SNI]
-	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N ] [-w]
-
-	 -a -- always login if authenticated, despite false/nologin shells
-	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
-	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
-	 -q -- quiet mode, turns off logging and utmp entries
-	 -6 -- use IPv6 rather than IPv4
-	 -w -- wrap around PID to appear in system PID space (must be last arg!)
-	 -H -- host to connect to; if omitted: passive connect (default)
-	 -p -- port to connect/listen to; default is 2222
-	 -P -- local port used in active connects (default is no bind)
-	 -g -- file containing list of good IP/IP6's in D/DoS case (default off)
-	 -A -- authorized-key file for users if starts with '/'; folder inside ~
-	       containing authorized_keys file otherwise; 'self' means to use
-	       blob-extraction (see -e); default is .crash
-	 -k -- servers key file; default is ./serverkey.priv
-	 -c -- X509 certificate-file that belongs to serverkey (-k);
-	       default is ./serverkey.pub
-	 -t -- watch triggerfile for certain message (-m) before connect/listen
-	 -m -- wait with connect/listen until message in file (-t) is seen
-	 -N -- disable TCP/UDP port forwarding
-	 -D -- use DTLS transport (requires -S)
-	 -S -- SNI to hide behind
-
+         -6 -- use IPv6 instead of IPv4
+         -v -- be verbose
+         -H -- host to connect to; if omitted: passive connect (default)
+         -p -- port to connect/listen to; default is 2222
+         -P -- local port used in active connects (default is no bind)
+         -i -- private key used for authentication
+         -K -- folder of known host keys if it ends with '/';
+               absolute path of known-hosts file otherwise;
+               'none' to disable; default is .crash/
+         -c -- command to execute on remote host
+         -X -- run proxy on this IP (default 127.0.0.1)
+         -Y -- forward TLS port lport with SNI to ip:rport on remote site
+         -U -- forward UDP port lport to ip:rport on remote site
+         -T -- forward TCP port lport to ip:rport on remote site
+         -4 -- start SOCKS4 server on lport to forward TCP sessions
+         -5 -- start SOCKS5 server on lport to forward TCP sessions
+         -R -- traffic blinding level (0-6, default 1)
+         -D -- use DTLS transport (requires -S)
+         -S -- SNI to use
+         -l -- user to login as (no default!)
 ```
 
 Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
@@ -337,6 +337,16 @@ addresses to be passed along. Since *chrome* will set the *SOCKS5* protocol *add
 always to *domain name* (`0x03`) - even if an IP address is entered in the address bar -
 SOCKS5 is not usable with *chrome*. But you can use *chrome* with *SOCKS4*, since this
 protocol only supports IPv4 addresses, not domain names.
+
+
+proxying based on SNI
+---------------------
+
+In some circumstances you might want to change the endpoint of the proxy session based
+on a SNI that you receive in the TLS `ClientHello`. For convenience, *crashc* integrates
+support for that by using `-Y lport:SNI:[ip]:rport` which listens on `lport` and forwards the
+given `SNI` to `ip:rport`. A fallback of `default` SNI can be given so that any non-matches or
+missing SNIs will be forwarded to that destination.
 
 
 DTLS transport

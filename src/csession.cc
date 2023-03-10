@@ -555,7 +555,10 @@ int client_session::handle()
 
 		d_fd2state[r].fd = r;
 		d_fd2state[r].rnode = it->second;
-		d_fd2state[r].state = STATE_ACCEPT;
+		if (it->second == "SNI")
+			d_fd2state[r].state = STATE_SNI_ACCEPT;	// real target determined by SNI that is sent
+		else
+			d_fd2state[r].state = STATE_ACCEPT;
 	}
 
 	for (auto it = config::udp_listens.begin(); it != config::udp_listens.end(); ++it) {
@@ -858,6 +861,47 @@ int client_session::handle()
 					tcp_nodes2sock[d_fd2state[afd].rnode] = afd;
 
 					tx_add(d_peer_fd, slen(7 + d_fd2state[afd].rnode.size()) + ":C:T:N:" + d_fd2state[afd].rnode);	// trigger tcp_connect() on remote side
+					d_pfds[d_peer_fd].events |= POLLOUT;
+
+				} else if (d_fd2state[i].state == STATE_SNI_ACCEPT) {
+					if ((afd = accept(i, nullptr, nullptr)) < 0)
+						continue;
+
+					d_pfds[afd].fd = afd;
+					d_pfds[afd].events = POLLIN;
+
+					d_fd2state[afd].fd = afd;
+					d_fd2state[afd].state = STATE_SNI_RCV;
+					d_fd2state[afd].time = d_now;
+
+				} else if (d_fd2state[i].state == STATE_SNI_RCV) {
+					r = recv(i, rbuf, sizeof(rbuf), MSG_PEEK);
+					auto node = https_to_node(rbuf, r > 0 ? r : 0);
+					if (r <= 0 || node.second == 0) {
+						close(i);
+						d_pfds[i].fd = -1;
+						d_pfds[i].events = 0;
+						d_fd2state[i].fd = -1;
+						d_fd2state[i].state = STATE_INVALID;
+						continue;
+					}
+
+					// Now that we know where we need to proxy to:
+					// append ID part of host/port/id/ header. We use the accepted sock fd
+					// as ID, as this is unique and identifies the TCP connection
+					char id[16] = {0}, port_hex[16] = {0};
+					snprintf(id, sizeof(id) - 1, "%04hx/", (unsigned short)i);	// FDID_MAX guarantees type short
+					snprintf(port_hex, sizeof(port_hex) - 1, "%04hx/", node.second);
+
+					d_pfds[i].events = 0;	// dont accept data until remote peer established proxy conn
+					d_fd2state[i].rnode = node.first + "/" + port_hex + id;
+					d_fd2state[i].state = STATE_CONNECT;
+					d_fd2state[i].time = d_now;
+					tx_clear(i);
+
+					tcp_nodes2sock[d_fd2state[i].rnode] = i;
+
+					tx_add(d_peer_fd, slen(7 + d_fd2state[i].rnode.size()) + ":C:T:N:" + d_fd2state[i].rnode);	// trigger tcp_connect() on remote side
 					d_pfds[d_peer_fd].events |= POLLOUT;
 
 				} else if (d_fd2state[i].state == STATE_SOCKS5_ACCEPT) {

@@ -1,7 +1,7 @@
-# WA / Signal proxy setup
+# WA / Telegram proxy setup
 
 How to get messenger connectivity if your internet is dead in copland. This covers
-*Signal* and *Whatsapp* messenger.
+*Telegram* and *Whatsapp* messenger.
 
 ## Outside
 
@@ -69,36 +69,22 @@ In your WA messenger, go to `Settings` -> `Storage and data` -> `Proxy settings`
 `192.168.0.123:1235`. It assumes that your phone is connected via wifi and using the same `192.168.0.0` network,
 as your *crashc* session is.
 
+## Telegram
+
+With *Telegram* it is similar as easy. Will just use
+
+```
+ $ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -5 1235 -l user -i authkey.priv -v
+```
+
+To setup a SOCKS5 proxy and configure it in the app as `Settings` -> `Data and Storage` -> `Proxy Settings` -> `Add Proxy`
+as SOCKS5 with `192.168.0.123` and port `1235`.
+
+
 ## Signal
 
-There is a similar [docu for Signal](https://github.com/signalapp/Signal-TLS-Proxy), this time using `nginx`.
-Things are a bit more complicated here, as *Signal* expects the proxy to SNI multiplex the TLS sessions based
-on this config:
+There is a [docu for Signal](https://github.com/signalapp/Signal-TLS-Proxy), using `nginx`.
 
-```
- map $ssl_preread_server_name $name {
-        chat.signal.org                         signal-service;
-        ud-chat.signal.org                      signal-service;
-        textsecure-service.whispersystems.org   signal-service;
-        storage.signal.org                      storage-service;
-        cdn.signal.org                          signal-cdn;
-        cdn2.signal.org                         signal-cdn2;
-        api.directory.signal.org                directory;
-        cdsi.signal.org                         cdsi;
-        contentproxy.signal.org                 content-proxy;
-        uptime.signal.org                       uptime;
-        api.backup.signal.org                   backup;
-        sfu.voip.signal.org                     sfu;
-        updates.signal.org                      updates;
-        updates2.signal.org                     updates2;
-        default                                 deny;
-    }
-...
-```
-
-which is not possible to handle by *crash* alone. You would need to setup a SNI multiplex with *sshttp* before
-that sits on the proxy port. This loses a lot of the beauty of simplicity used in the *Whatsapp* case, so you
-could also just use their provided nginx docker setup. Still overblown and does not take into account that
-direct connections to `signal-service` may be blocked, so lets hope *Signal* will use the same easy port forward in
-future and I do not need to add a chapter on SNI multiplex over DNS tunnels to this document.
+Unfortunately *Signal* is using TLS-in-TLS tunneling with SNI proxying in the inner tunnel which
+requires sort of more complex setup that can't be handled by *crash* alone.
 

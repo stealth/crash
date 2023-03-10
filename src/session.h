@@ -102,7 +102,7 @@ protected:
 
 	unsigned int d_chunk_size{TCP_CHUNK_SIZE};
 
-	uint16_t d_major{3}, d_minor{0};
+	uint16_t d_major{3}, d_minor{1};
 
 	// my own stringview for optimization of tx_string() in C++11 that doesn't have it yet
 	class strview {
@@ -213,7 +213,7 @@ class server_session : public session {
 
 	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""};
 
-	std::string d_banner{"1000 crashd-3.0000 OK\r\n"};	// keep in sync with d_major and d_minor
+	std::string d_banner{"1000 crashd-3.0001 OK\r\n"};	// keep in sync with d_major and d_minor
 
 	iobox d_iob;
 

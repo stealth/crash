@@ -32,6 +32,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <utility>
 #include <cstdlib>
 #include <unistd.h>
 #include <termios.h>
@@ -342,6 +343,111 @@ void setproctitle(const string &proc)
 	prctl(PR_SET_NAME, proc.c_str(), 0, 0, 0);
 #endif
 }
+
+
+// unaligned int ptr access
+static uint16_t ua_uint16_ntohs(const void *vp)
+{
+	uint16_t x = 0;
+	memcpy(&x, vp, sizeof(x));
+	return ntohs(x);
+}
+
+
+pair<string, uint16_t> https_to_node(const char *chello, int bsize)
+{
+	pair<string, uint16_t> ret = {};
+
+	const unsigned char *ptr = reinterpret_cast<const unsigned char *>(chello), *end = ptr + bsize;
+
+	// TLS record; Handshake, version, len
+	if (end - ptr <= 5 || bsize <= 5)
+		return ret;
+	ptr += 5;
+
+	// ClientHello?
+	if (*ptr != 1)
+		return ret;
+	++ptr;
+
+	auto it = config::sni2node.find("default");
+	if (it != config::sni2node.end())
+		ret = it->second;
+
+	if (end - ptr <= 5 + 32 + 1)	// record + Random + session_id len
+		return ret;
+	ptr += 5 + 32;
+
+	uint8_t sessid_len = *ptr;
+	++ptr;
+	if (end - ptr <= sessid_len)
+		return ret;
+	ptr += sessid_len;
+
+	if (end - ptr <= 2)	// cipher suite len
+		return ret;
+	uint16_t clen = ua_uint16_ntohs(ptr);
+	ptr += 2;
+	if (end - ptr <= clen)
+		return ret;
+	ptr += clen;
+
+	if (end - ptr <= 1)	// compression len
+		return ret;
+	clen = *ptr;
+	++ptr;
+	if (end - ptr <= clen)
+		return ret;
+	ptr += clen;
+
+	if (end - ptr <= 2)	// Extensions len (sum of all Ex.)
+		return ret;
+
+	// skip Extensions len and iterate over each extension until we find SNI
+	ptr += 2;
+
+	for (; ptr < end;) {
+		if (end - ptr <= 2)	// Ex. Type
+			break;
+		uint16_t etype = ua_uint16_ntohs(ptr);
+		ptr += 2;
+		if (end - ptr <= 2)	// Ex. Len
+			break;
+		clen = ua_uint16_ntohs(ptr);
+		ptr += 2;
+		if (end - ptr <= clen)
+			break;
+
+		// servername Ex. found? Go deeper to parse SNI Ex. (what a stupid protocol)
+		// Theoretically there could be a lot of Server Name Types and list of hosts, but
+		// we only allow "hostname" type and just one of them
+		if (etype == 0) {
+			if (end - ptr <= 2)
+				break;
+			clen = ua_uint16_ntohs(ptr);	// Server Name List len
+			ptr += 2;
+			if (end - ptr <= clen || end - ptr <= 1)	// 1 for Server Name Type
+				break;
+			if (*ptr != 0)		// Server Name Type 0 -> Host Name
+				break;
+			++ptr;
+			if (end - ptr <= 2)
+				break;
+			clen = ua_uint16_ntohs(ptr);	// hostname len
+			ptr += 2;
+			if (end - ptr < clen)
+				break;
+			string hostname = string(reinterpret_cast<const char *>(ptr), clen);
+			if (config::sni2node.count(hostname) > 0)
+				ret = config::sni2node[hostname];
+			break;
+		}
+		ptr += clen;
+	}
+
+	return ret;
+}
+
 
 }
 

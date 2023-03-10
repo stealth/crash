@@ -52,7 +52,8 @@ void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
-	       "\t [-T lport:[ip]:rport] [-4 lport] [-5 lport] [-R level] <-l user>\n\n"
+	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
+	       "\t [-R level] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
@@ -64,6 +65,7 @@ void help(const char *p)
 	       "\t       'none' to disable; default is %s\n"
 	       "\t -c -- command to execute on remote host\n"
 	       "\t -X -- run proxy on this IP (default 127.0.0.1)\n"
+	       "\t -Y -- forward TLS port lport with SNI to ip:rport on remote site\n"
 	       "\t -U -- forward UDP port lport to ip:rport on remote site\n"
 	       "\t -T -- forward TCP port lport to ip:rport on remote site\n"
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
@@ -89,10 +91,10 @@ int main(int argc, char **argv)
 	string ostr = "";
 
 	int c = 0, traffic_policy = 1;
-	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0};
+	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0}, sni[128] = {0};
 	uint16_t rport = 0;
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:l:i:c:R:T:U:5:4:S:D")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:Y:l:i:c:R:T:U:5:4:S:D")) != -1) {
 		switch (c) {
 		case 'D':
 			config::transport = "dtls1";
@@ -146,6 +148,12 @@ int main(int argc, char **argv)
 				ostr += "crashc: set up local UDP port " + string(lport) + " to proxy to " + string(ip) + ":" + to_string(rport) + " @ remote.\n";
 			}
 			break;
+		case 'Y':
+			if (sscanf(optarg, "%15[0-9]:%127[^:]:[%127[^]]]:%hu", lport, sni, ip, &rport) == 4) {
+				config::sni2node[sni] = { ip, rport};
+				config::tcp_listens[lport] = "SNI";
+				ostr += "crashc: set up local TCP port "  + string(lport) + " to proxy for SNI " + sni + " to " + string(ip) + ":" + to_string(rport) + " @ remote.\n";
+			}
 		case '4':
 			if (config::socks4_fd == -1) {
 				config::socks4_port = strtoul(optarg, nullptr, 10);

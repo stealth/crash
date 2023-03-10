@@ -4,6 +4,7 @@
 #include <map>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 namespace config
 {
@@ -18,6 +19,8 @@ namespace config
 	extern std::string tfile, tmsg, good_ip_file;
 
 	extern std::map<std::string, std::string> tcp_listens, udp_listens;
+
+	extern std::map<std::string, std::pair<std::string, uint16_t>> sni2node;
 
 	extern int socks5_port, socks5_fd, socks4_port, socks4_fd;
 }

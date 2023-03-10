@@ -1,6 +1,7 @@
 #include <map>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include "misc.h"
 
 namespace config
@@ -41,6 +42,8 @@ namespace config
 	std::string good_ip_file = "";
 
 	std::map<std::string, std::string> tcp_listens, udp_listens;
+
+	std::map<std::string, std::pair<std::string, uint16_t>> sni2node;
 
 	int socks5_port = -1, socks5_fd = -1, socks4_port = -1, socks4_fd = -1;
 }

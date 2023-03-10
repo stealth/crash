@@ -35,6 +35,7 @@
 
 #include <string>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include <deque>
 #include <time.h>
@@ -62,6 +63,8 @@ enum {
 	STATE_SOCKS5_AUTH2	=	14,
 	STATE_SOCKS4_ACCEPT	=	15,
 	STATE_SOCKS4_AUTH	=	16,
+	STATE_SNI_ACCEPT	=	17,
+	STATE_SNI_RCV		=	18,
 
 	CLOSING_TIME		=	10,
 	CONNECT_TIME		=	30,
@@ -153,6 +156,8 @@ bool is_good_ip(const struct in6_addr &);
 bool is_nologin(const std::string &);
 
 void setproctitle(const std::string &);
+
+std::pair<std::string, uint16_t> https_to_node(const char *, int);
 
 }
 
