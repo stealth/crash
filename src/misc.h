@@ -112,10 +112,8 @@ struct state {
 	// TX buffer
 	std::vector<std::string> ovec;
 
-	// must only be pushed/popped in pairs. Each reply datagram needs a port on 127.0.0.1
-	// where it is sent to
-	std::deque<std::string> odgrams;
-	std::deque<uint16_t> ulports;
+	// deque of { UDP id, data } of UDP datagrams in out queue
+	std::deque<std::pair<uint16_t, std::string>> odgrams;
 
 	std::string::size_type tx_len{0};
 };

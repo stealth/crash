@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -899,14 +899,13 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 
 					tx_remove(i, r);
 				} else if (d_fd2state[i].state == STATE_UDPCLIENT) {
-					string &dgram = d_fd2state[i].odgrams.front();
+					const string &dgram = d_fd2state[i].odgrams.front().second;
 					// No need to sendto(), each socket with ID is connect()'ed since -U binding already knows
 					// the remote IP:port to send to
 					if ((r = send(i, dgram.c_str(), dgram.size(), 0)) <= 0)
 						continue;
 
 					d_fd2state[i].odgrams.pop_front();
-					d_fd2state[i].ulports.pop_front();	// unused in server part; yet filled in external cmd_handler()
 				}
 
 				if (tx_empty(i) && d_fd2state[i].odgrams.empty())

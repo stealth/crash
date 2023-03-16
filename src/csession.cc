@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -590,12 +590,6 @@ int client_session::handle()
 		d_fd2state[config::socks4_fd].state = STATE_SOCKS4_ACCEPT;
 	}
 
-	// Build a local address for sending reply UDP dgrams. Only the dst port is unknown yet
-	// and will be constructed from the ID part of the IP/port/ID header
-	struct sockaddr_in lsin;
-	lsin.sin_family = AF_INET;
-	inet_pton(AF_INET, "127.0.0.1", &lsin.sin_addr);
-
 	// only now set non-blocking mode and moving write buffers
 	if (d_type == SOCK_STREAM) {
 		int flags = fcntl(d_peer_fd, F_GETFL);
@@ -1056,18 +1050,17 @@ int client_session::handle()
 
 				} else if (d_fd2state[i].state == STATE_UDPSERVER) {
 
-					// Always listens on 127.0.0.1, so this is always AF_INET
-					sockaddr_in sin;
+					char sin[sizeof(sockaddr_in) + sizeof(sockaddr_in6)] = {0};
 					socklen_t sinlen = sizeof(sin);
-					if ((r = recvfrom(i, sbuf, sizeof(sbuf), 0, reinterpret_cast<sockaddr *>(&sin), &sinlen)) <= 0)
+					if ((r = recvfrom(i, sbuf, sizeof(sbuf), 0, reinterpret_cast<sockaddr *>(sin), &sinlen)) <= 0)
 						continue;
 
-					// in UDP case, we use the local port as ID.
+					// in UDP case, we need to generate a unique ID based on dgram origin. If the origin was already
+					// given an unique ID, put() will find and return it transparently
 					char id[16] = {0};
-					snprintf(id, sizeof(id) - 1, "%04hx/", sin.sin_port);
+					snprintf(id, sizeof(id) - 1, "%04hx/", d_udp_node2id.put(string(sin, sinlen)));
 
-					// Note here that ID needs to be appended, unlike with TCP. This is since sock fd doesnt
-					// distinguish sessions but local ports do this in UDP mode
+					// Note here that ID needs to be appended, unlike with TCP.
 					tx_add(d_peer_fd, slen(7 + d_fd2state[i].rnode.size() + 5 + r) + ":C:U:S:" + d_fd2state[i].rnode + id + string(sbuf, r));
 					d_pfds[d_peer_fd].events |= POLLOUT;
 
@@ -1098,13 +1091,13 @@ int client_session::handle()
 					d_fd2state[i].time = d_now;
 					tx_remove(i, r);
 				} else if (d_fd2state[i].state == STATE_UDPSERVER) {
-					string &dgram = d_fd2state[i].odgrams.front();
-					lsin.sin_port = d_fd2state[i].ulports.front();	// ID == dst port of reply datagram already in network order
-					if ((r = sendto(i, dgram.c_str(), dgram.size(), 0, reinterpret_cast<const sockaddr *>(&lsin), sizeof(lsin))) <= 0)
+					const string &dgram = d_fd2state[i].odgrams.front().second;
+					string sin = d_udp_node2id.get(d_fd2state[i].odgrams.front().first);	// map id back to originating sockaddr
+
+					if ((r = sendto(i, dgram.c_str(), dgram.size(), 0, reinterpret_cast<const sockaddr *>(sin.c_str()), sin.size())) <= 0)
 						continue;
 
 					d_fd2state[i].odgrams.pop_front();
-					d_fd2state[i].ulports.pop_front();
 					d_fd2state[i].time = d_now;
 				}
 

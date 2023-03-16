@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -223,13 +223,13 @@ string session::tx_string_and_clear(int fd, string::size_type max)
 
 	auto sv = tx_string(fd, seq, bk_str, max);
 
-	// if backing string is empty after return, it means we have streams based optimization
+	// if backing string is empty after return, it means we have SOCK_STREAM based optimization
 	// and need to copy the strview, as we are meant to return a string that survives
 	// the clearance of ovec buffers
 	if (bk_str.empty())
 		bk_str = string(sv.c_str(), sv.size());
 
-	// not we have the str, it can be cleared
+	// now we have the str, it can be cleared
 	tx_clear(fd);
 
 	// no move(), RVO
@@ -456,7 +456,6 @@ int session::net_cmd_handler(const string &cmd)
 		d_fd2state[sock].fd = sock;
 		d_fd2state[sock].state = STATE_CONNECT;
 		d_fd2state[sock].odgrams.clear();
-		d_fd2state[sock].ulports.clear();
 		d_fd2state[sock].rnode = node;
 		d_fd2state[sock].time = d_now;
 		tx_clear(sock);
@@ -475,7 +474,6 @@ int session::net_cmd_handler(const string &cmd)
 		d_fd2state[sock].fd = sock;
 		d_fd2state[sock].state = STATE_CONNECTED;
 		d_fd2state[sock].odgrams.clear();
-		d_fd2state[sock].ulports.clear();
 		d_fd2state[sock].time = d_now;
 		tx_clear(sock);
 
@@ -497,7 +495,6 @@ int session::net_cmd_handler(const string &cmd)
 
 		d_fd2state[sock].state = STATE_CLOSING;
 		d_fd2state[sock].odgrams.clear();
-		d_fd2state[sock].ulports.clear();
 		d_fd2state[sock].time = d_now;
 
 	// Send or receive data. No NETCMD_SEND_ALLOW check, since the node will not be in
@@ -534,9 +531,7 @@ int session::net_cmd_handler(const string &cmd)
 		d_pfds[sock].events = POLLIN;
 
 		if (cmd.size() > 5 + 7 + node.size()) {
-			d_fd2state[sock].odgrams.push_back(cmd.substr(5 + 7 + node.size(), len - 7 - node.size()));	// strip off data part (startes after "%05hu:C:U:S")
-			d_fd2state[sock].ulports.push_back(id);
-
+			d_fd2state[sock].odgrams.push_back({id, cmd.substr(5 + 7 + node.size(), len - 7 - node.size())});	// strip off data part (startes after "%05hu:C:U:S")
 			d_pfds[sock].events |= POLLOUT;
 		}
 		d_fd2state[sock].time = d_now;
