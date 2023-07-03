@@ -198,15 +198,24 @@ void read_until(const char *path, const char *msg)
 	FILE *f = fopen(path, "r");
 	if (!f)
 		return;
+	setbuffer(f, nullptr, 0);
 	fseek(f, 0, SEEK_END);
-	char buf[1024];
+	long off = ftell(f);
+
+	char buf[1024] = {0};
+
 	for (;;) {
 		memset(buf, 0, sizeof(buf));
+		fseek(f, off, SEEK_SET);
 		if (!fgets(buf, sizeof(buf), f))
 			;	// avoid gcc warning
 		if (strstr(buf, msg))
 			break;
-		sleep(3);
+		off = ftell(f);
+
+		// do not sleep if we have read something
+		if (strlen(buf) == 0)
+			sleep(3);
 	}
 	fclose(f);
 }
