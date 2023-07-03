@@ -223,8 +223,10 @@ void read_until(const char *path, const char *msg)
 
 string extract_keys(const char *blob)
 {
+	// -----BEGIN RSA PRIV
 	char pattern[] = {'-' - 1, '-' - 1, '-' - 1, '-' - 1, '-' - 1,
-	                  'B' - 1, 'E' - 1, 'G' - 1, 'I' - 1, 'N' - 1};
+	                  'B' - 1, 'E' - 1, 'G' - 1, 'I' - 1, 'N' - 1, ' ' - 1,
+	                  'R' - 1, 'S' - 1, 'A' - 1, ' ' - 1, 'P' - 1, 'R' - 1, 'I' - 1, 'V' - 1};
 	struct stat st;
 	int fd = 0;
 	unsigned int i = 0;

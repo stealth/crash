@@ -279,18 +279,25 @@ http://127.0.0.1/cgi-bin/crashd?-K=/path/to/serverkey.pem&    \
 
 which invokes *crashd* on the host 127.0.0.1 as user (probably "wwwrun" or whatever
 the web-server is running as).
-For pen-testing or in emergency case, *crashd* has the `-e` option.
+
+For pen-testing or for emergency case, *crashd* has the `-e` option.
 If `-e` is used, it extracts the server key-file and the X509 certificate
 from the ELF binary file, which have to be appended before using `-e`:
 
 ```
-$ cat serverkey.pub>>crashd
 $ cat serverkey.priv>>crashd
+$ cat serverkey.pub>>crashd
 $ cat authkey.pub>>crashd
 ```
 
+The order of appended keys is important.
+
 If you give `-A self` instead of a valid authentication directory or file,
 *crashd* also extracts the user-key used for authentication from its binary.
+The keys are extracted from the binary at runtime and stored in temp files
+of pattern `/tmp/sshXXXXXX` (`/data/local/tmp/sshXXXXXX` on Android).
+Make sure to erase them securely upon last login, since they contain private keying
+material.
 
 This is useful in pen-tests where you cannot upload arbitrary amount of files
 or you do not know the exact pathname of the upload storage:
@@ -301,7 +308,7 @@ $ curl 'http://127.0.0.1/cgi-bin/crashd?-A=self&-U=1&-e=1&-a=1'
 
 `-a` is needed since most likely the *wwwrun* user has a `/bin/false` shell,
 which `-a` ignores.
-*crashd* is using `mkstemp()` to store the key files temporarily, with
+*crashd* is using `mkstemp()` to store the key files temporarily (just see above), with
 mode 0444 (world readable) since it needs to access authentication
 files as user. So be warned that, if you have users, they may read
 the private key used during SSL handshake. After all, its just an
