@@ -100,7 +100,8 @@ enum {
 	TCP_POLL_TO		=	1000,
 	UDP_POLL_TO		=	450,
 
-	MAX_OVEC_SIZE		=	32
+	MAX_OVEC_SIZE		=	32,
+	MAX_NAME_LEN		=	39		// maximum len of SOCKS5 DNS names that we accept
 };
 
 struct state {

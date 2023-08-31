@@ -7,7 +7,7 @@
 namespace config
 {
 	bool verbose = 0, silent = 0, v6 = 0, uid_change = 1, wrap = 0,
-	     always_login = 0, extract_blob = 0, no_hk_check = 0, no_net = 0;
+	     always_login = 0, extract_blob = 0, no_hk_check = 0, no_net = 0, socks5_dns = 0;
 
 	uint32_t traffic_flags = crash::TRAFFIC_PAD1;
 

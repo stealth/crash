@@ -338,12 +338,18 @@ SOCKS4 and SOCKS5 support
 *crash* also supports forwarding of TCP connections via *SOCKS4* (`-4 port`) and *SOCKS5*
 (`-5 port`). This sets up *port* as SOCKS port for TCP connections, so for instance you
 can browse remote networks via *crashc* sessions without the need to open any other
-connection during a pen-test. For *chrome*, *SOCKS4* must be used, as the crash SOCKS implementation
-does not support resolving domain names on their own. Instead, it requires IPv4 or IPv6
-addresses to be passed along. Since *chrome* will set the *SOCKS5* protocol *address type*
-always to *domain name* (`0x03`) - even if an IP address is entered in the address bar -
-SOCKS5 is not usable with *chrome*. But you can use *chrome* with *SOCKS4*, since this
-protocol only supports IPv4 addresses, not domain names.
+connection during a pentest. If you pass `-N` to `crashc`, it enables DNS name resolution
+on the remote side, so you can also use chrome with it. But be warned: There is a privacy
+problem with browsers that try to resolve a sequence of DNS names upon startup that
+is not under your control. Also, if your remote side has a broken DNS setup, your typing
+shell may block for several seconds if DNS reply packets are missing. There are no good
+async resolver functions which are embeddable and portable so I had to rely on
+`getaddrinfo()` in the single thread at the price of possible blockings for several seconds
+if DNS problems exist. Thats why name resolving has to be enabled explicitly. `crashd`
+tries to minimize this potential problem with DNS lookup caches though, so in most
+situation it should just work painlessly.
+If you pass `-X IP-address` (must be the first argument), you can bind your local proxy
+to an address different from `127.0.0.1`, so you can share the proxy in your local network.
 
 
 proxying based on SNI
