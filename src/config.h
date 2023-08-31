@@ -18,6 +18,8 @@ namespace config
 
 	extern std::string tfile, tmsg, good_ip_file;
 
+	extern std::string socks5_connect_proxy, socks5_connect_proxy_port;
+
 	extern std::map<std::string, std::string> tcp_listens, udp_listens;
 
 	extern std::map<std::string, std::pair<std::string, uint16_t>> sni2node;

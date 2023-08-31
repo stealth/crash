@@ -41,6 +41,8 @@ namespace config
 
 	std::string good_ip_file = "";
 
+	std::string socks5_connect_proxy = "", socks5_connect_proxy_port = "";
+
 	std::map<std::string, std::string> tcp_listens, udp_listens;
 
 	std::map<std::string, std::pair<std::string, uint16_t>> sni2node;

@@ -53,7 +53,7 @@ void help(const char *p)
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
-	       "\t [-R level] [-N] <-l user>\n\n"
+	       "\t [-R level] [-N] [-x socks5://[ip]:port] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
@@ -74,6 +74,7 @@ void help(const char *p)
 	       "\t -R -- traffic blinding level (0-6, default 1)\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -S -- SNI to use\n"
+	       "\t -x -- use this SOCKS5 proxy when connecting\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
 }
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
 	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0}, sni[128] = {0};
 	uint16_t rport = 0;
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:Y:l:i:c:R:T:U:5:4:S:DN")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:Y:l:i:c:R:T:U:5:4:S:x:DN")) != -1) {
 		switch (c) {
 		case 'N':
 			config::socks5_dns = 1;
@@ -175,6 +176,12 @@ int main(int argc, char **argv)
 		case 'S':
 			config::sni = optarg;
 			break;
+		case 'x':
+			if (sscanf(optarg, "socks5://[%127[^]]]:%hu", ip, &rport) == 2) {
+				config::socks5_connect_proxy = ip;
+				config::socks5_connect_proxy_port = to_string(rport);
+			}
+			break;
 		default:
 			help(*argv);
 			return 0;
@@ -189,7 +196,8 @@ int main(int argc, char **argv)
 	sa.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &sa, nullptr);
 
-	if (config::user.length() == 0 || (config::transport == "dtls1" && config::sni.empty())) {
+	if (config::user.length() == 0 || (config::transport == "dtls1" && config::sni.empty()) ||
+	    (config::transport == "dtls1" && config::socks5_connect_proxy.size() > 0)) {
 		printf("\nMissing or invalid combination of options.\n");
 		help(*argv);
 		return 1;
