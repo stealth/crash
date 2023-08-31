@@ -1005,9 +1005,11 @@ int client_session::handle()
 
 					// expect SOCKS5 connect request
 					if ((r = recv(i, sbuf, sizeof(sbuf), 0)) < 10 ||
-					    s5r->vers != 5 ||				// wrong version?
-					    (s5r->atype != 1 && s5r->atype != 4) ||	// IPv4 or IPv6
-					    s5r->cmd != 1) {				// not a TCP-connect?
+					    s5r->vers != 5 ||						// wrong version?
+					    (s5r->atype != 1 && s5r->atype != 3 && s5r->atype != 4) ||	// not IPv4 or DNS name or IPv6?
+					    s5r->cmd != 1 ||						// not a TCP-connect?
+					    (s5r->atype == 3 && s5r->name.nlen > MAX_NAME_LEN) ||	// DNS name too long?
+					    (s5r->atype == 3 && !config::socks5_dns)) {			// SOCKS5 resolving not enabled?
 						s5r->cmd = 0x08;			// atype not supported
 						flush_fd(i, string(sbuf, 2));
 						close(i);
@@ -1022,12 +1024,22 @@ int client_session::handle()
 					char dst[128] = {0};
 					uint16_t rport = 0;
 
+					// IPv4
 					if (s5r->atype == 1) {
 						inet_ntop(AF_INET, &s5r->v4.dst, dst, sizeof(dst) - 1);
 						rport = ntohs(s5r->v4.dport);
-					} else {
+
+					// IPv6
+					} else if (s5r->atype == 4) {
 						inet_ntop(AF_INET6, &s5r->v6.dst, dst, sizeof(dst) - 1);
 						rport = ntohs(s5r->v6.dport);
+
+					// DNS name
+					} else {
+						memcpy(dst, s5r->name.name, s5r->name.nlen);
+						uint16_t tmp;
+						memcpy(&tmp, s5r->name.name + s5r->name.nlen, sizeof(tmp));
+						rport = ntohs(tmp);
 					}
 
 					// Now that we know where connection is going to, we can build

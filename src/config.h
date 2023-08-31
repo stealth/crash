@@ -9,7 +9,7 @@
 namespace config
 {
 	extern bool verbose, silent, v6, uid_change, wrap,
-	            always_login, extract_blob, no_hk_check, no_net;
+	            always_login, extract_blob, no_hk_check, no_net, socks5_dns;
 
 	extern uint32_t traffic_flags;
 

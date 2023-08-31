@@ -146,9 +146,16 @@ struct alignas(4) v4_tuple {
 	uint16_t dport;
 };
 
+
 struct alignas(4) v6_tuple {
 	in6_addr dst;
 	uint16_t dport;
+};
+
+
+struct alignas(1) name_tuple {
+	uint8_t nlen;
+	char name[255 + 2];	// +2 for dst port
 };
 
 struct socks5_req {
@@ -156,6 +163,7 @@ struct socks5_req {
 	union alignas(4) {
 		v4_tuple v4;
 		v6_tuple v6;
+		name_tuple name;
 	};
 };	// no __attribute__((packed)) needed, as its properly aligned
 
