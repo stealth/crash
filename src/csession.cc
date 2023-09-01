@@ -182,7 +182,7 @@ int client_session::setup()
 
 	if (config::host.length() == 0 && d_transport == "tls1") {
 		int sock_fd = 0;
-		if ((sock_fd = sock->blisten(strtoul(config::port.c_str(), nullptr, 10))) < 0) {
+		if ((sock_fd = sock->blisten(config::laddr, config::lport)) < 0) {
 			d_err = "client_session::setup::";
 			d_err += sock->why();
 			return -1;
@@ -196,12 +196,14 @@ int client_session::setup()
 		//close(sock_fd);
 	} else if (config::host.length() > 0) {
 
-		if (config::local_port.length() > 0)
-			sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
+		if (sock->blisten(config::laddr, config::lport, 0) < 0) {
+			d_err = "client_session::setup::";
+			d_err += sock->why();
+			return -1;
+		}
 
 		if (!config::socks5_connect_proxy.empty())
 			sock->socks5(config::socks5_connect_proxy, config::socks5_connect_proxy_port);
-
 
 		// need to dup, since we are owner of d_peer_fd but connect() returns sock owned fd
 		if ((d_peer_fd = dup(sock->connect(config::host, config::port))) < 0) {

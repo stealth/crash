@@ -243,8 +243,8 @@ int Server::loop()
 	}
 
 	// No host -> passive
-	if (config::host.length() == 0) {
-		if ((d_sock_fd = d_sock->blisten(strtoul(config::port.c_str(), nullptr, 10))) < 0) {
+	if (config::host.empty()) {
+		if ((d_sock_fd = d_sock->blisten(config::laddr, config::lport)) < 0) {
 			d_err = "Server::loop::";
 			d_err += d_sock->why();
 			return -1;
@@ -339,15 +339,22 @@ int Server::loop()
 
 			// DGRAM sockets must be closed and re-bound, as the connect() on dup-ed peer_fd also changed state
 			// of d_sock_fd. recycle() handles that.
-			if (d_sock->recycle() < 0 || (d_sock_fd = d_sock->blisten(strtoul(config::port.c_str(), nullptr, 10))) < 0) {
+			if (d_sock->recycle() < 0 || (d_sock_fd = d_sock->blisten(config::laddr, config::lport)) < 0) {
 				d_err = "Server::loop::";
 				d_err += d_sock->why();
 				return -1;
 			}
 		}
+
+	// target host was given -> active connect
 	} else if (d_transport == "tls1") {
-		if (config::local_port.length() > 0)
-			d_sock->blisten(strtoul(config::local_port.c_str(), nullptr, 10), 0);
+		if (d_sock->blisten(config::laddr, config::lport, 0) < 0) {
+			d_err = "Server::loop::";
+			d_err += d_sock->why();
+			return -1;
+		}
+		if (!config::socks5_connect_proxy.empty())
+			d_sock->socks5(config::socks5_connect_proxy, config::socks5_connect_proxy_port);
 		if ((d_sock_fd = d_sock->connect(config::host, config::port)) < 0) {
 			d_err = "Server::loop::";
 			d_err += d_sock->why();

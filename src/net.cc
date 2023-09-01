@@ -105,35 +105,26 @@ Socket::~Socket()
 }
 
 
-int Socket::blisten(unsigned short port, bool do_listen)
+int Socket::blisten(const string &laddr, const string &lport, bool do_listen)
 {
-	int one = 1;
+	int one = 1, r = 0;
 	setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-	struct sockaddr *sin = nullptr;
-	struct sockaddr_in sin4;
-	struct sockaddr_in6 sin6;
-	socklen_t slen = 0;
-	if (d_family == AF_INET) {
-		memset(&sin4, 0, sizeof(sin4));
-		sin4.sin_port = htons(port);
-		sin4.sin_family = AF_INET;
-		sin4.sin_addr.s_addr = INADDR_ANY;
-		sin = (struct sockaddr *)&sin4;
-		slen = sizeof(sin4);
-	} else if (d_family == AF_INET6) {
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_port = htons(port);
-		sin6.sin6_family = AF_INET6;
-		//sin6.sin6_addr = in6addr_any;
-		sin = (struct sockaddr *)&sin6;
-		slen = sizeof(sin6);
-	} else {
-		d_error = "Socket::bind:unknown family type!";
+	struct addrinfo hint = {0}, *tai = nullptr;
+
+	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
+	hint.ai_socktype = d_type;
+	hint.ai_family = d_family;
+
+	if ((r = getaddrinfo(laddr.c_str(), lport.c_str(), &hint, &tai)) != 0) {
+		d_error = "Socket::blisten::getaddrinfo:";
+		d_error += gai_strerror(r);
 		return -1;
 	}
 
-	if (::bind(d_sock_fd, sin, slen) < 0) {
+	unique_ptr<addrinfo, decltype(&freeaddrinfo)> ai(tai, freeaddrinfo);
+
+	if (::bind(d_sock_fd, ai->ai_addr, ai->ai_addrlen) < 0) {
 		d_error = "Socket::bind:";
 		d_error += strerror(errno);
 		return -1;
@@ -170,9 +161,8 @@ int Socket::socks5(const string &proxy, const string &port)
 int Socket::connect(const string &host, const string &port)
 {
 	int r = 0;
-	struct addrinfo hint, *tai = nullptr;
+	struct addrinfo hint = {0}, *tai = nullptr;
 
-	memset(&hint, 0, sizeof(hint));
 	hint.ai_flags = AI_NUMERICSERV;
 	hint.ai_socktype = d_type;
 	hint.ai_family = d_family;
@@ -283,8 +273,9 @@ map<string, int> tcp_nodes2sock, udp_nodes2sock;
 static int listen(int type, const string &ip, const string &port)
 {
 	int r = 0, sock_fd = -1;
-	addrinfo hint, *tai = nullptr;
-	memset(&hint, 0, sizeof(hint));
+
+	addrinfo hint = {0}, *tai = nullptr;
+	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
 	hint.ai_socktype = type;
 
 	if ((r = getaddrinfo(ip.c_str(), port.c_str(), &hint, &tai)) < 0)
@@ -342,8 +333,7 @@ static int connect(int type, const string &name, const string &port)
 	int r = 0, sock_fd = -1, one = 1;
 	socklen_t len = sizeof(one);
 
-	addrinfo hint, *tai = nullptr;
-	memset(&hint, 0, sizeof(hint));
+	addrinfo hint = {0}, *tai = nullptr;
 	hint.ai_socktype = type;
 	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
 
