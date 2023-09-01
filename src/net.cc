@@ -105,35 +105,26 @@ Socket::~Socket()
 }
 
 
-int Socket::blisten(unsigned short port, bool do_listen)
+int Socket::blisten(const string &laddr, const string &lport, bool do_listen)
 {
-	int one = 1;
+	int one = 1, r = 0;
 	setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-	struct sockaddr *sin = nullptr;
-	struct sockaddr_in sin4;
-	struct sockaddr_in6 sin6;
-	socklen_t slen = 0;
-	if (d_family == AF_INET) {
-		memset(&sin4, 0, sizeof(sin4));
-		sin4.sin_port = htons(port);
-		sin4.sin_family = AF_INET;
-		sin4.sin_addr.s_addr = INADDR_ANY;
-		sin = (struct sockaddr *)&sin4;
-		slen = sizeof(sin4);
-	} else if (d_family == AF_INET6) {
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_port = htons(port);
-		sin6.sin6_family = AF_INET6;
-		//sin6.sin6_addr = in6addr_any;
-		sin = (struct sockaddr *)&sin6;
-		slen = sizeof(sin6);
-	} else {
-		d_error = "Socket::bind:unknown family type!";
+	struct addrinfo hint = {0}, *tai = nullptr;
+
+	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
+	hint.ai_socktype = d_type;
+	hint.ai_family = d_family;
+
+	if ((r = getaddrinfo(laddr.c_str(), lport.c_str(), &hint, &tai)) != 0) {
+		d_error = "Socket::blisten::getaddrinfo:";
+		d_error += gai_strerror(r);
 		return -1;
 	}
 
-	if (::bind(d_sock_fd, sin, slen) < 0) {
+	unique_ptr<addrinfo, decltype(&freeaddrinfo)> ai(tai, freeaddrinfo);
+
+	if (::bind(d_sock_fd, ai->ai_addr, ai->ai_addrlen) < 0) {
 		d_error = "Socket::bind:";
 		d_error += strerror(errno);
 		return -1;
@@ -151,17 +142,46 @@ int Socket::blisten(unsigned short port, bool do_listen)
 }
 
 
+int Socket::socks5(const string &proxy, const string &port)
+{
+
+	if (d_type != SOCK_STREAM)
+		return -1;
+
+	d_socks5_proxy = proxy;
+	d_socks5_port = port;
+
+	if (port.empty())
+		d_socks5_port = "5555";
+
+	return 0;
+}
+
+
 int Socket::connect(const string &host, const string &port)
 {
 	int r = 0;
-	struct addrinfo hint, *tai = nullptr;
+	struct addrinfo hint = {0}, *tai = nullptr;
 
-	memset(&hint, 0, sizeof(hint));
-	hint.ai_family = d_family;
+	hint.ai_flags = AI_NUMERICSERV;
 	hint.ai_socktype = d_type;
+	hint.ai_family = d_family;
 
-	if ((r = getaddrinfo(host.c_str(), port.c_str(), &hint, &tai)) < 0) {
-		d_error = "Socket::getaddrinfo:";
+	string next_host = host, next_port = port;
+
+	if (!d_socks5_proxy.empty()) {
+
+		if (host.size() > 255) {
+			d_error = "Socket::connect::host name size too large for SOCKS5 request";
+			return -1;
+		}
+		hint.ai_socktype = SOCK_STREAM;
+		next_host = d_socks5_proxy;
+		next_port = d_socks5_port;
+	}
+
+	if ((r = getaddrinfo(next_host.c_str(), next_port.c_str(), &hint, &tai)) != 0) {
+		d_error = "Socket::connect::getaddrinfo:";
 		d_error += gai_strerror(r);
 		return -1;
 	}
@@ -172,6 +192,73 @@ int Socket::connect(const string &host, const string &port)
 		d_error = "Socket::connect:";
 		d_error += strerror(errno);
 		return -1;
+	}
+
+	if (!d_socks5_proxy.empty()) {
+
+		// SOCKS5 greeting
+		struct alignas(1) {
+			uint8_t vers, nauth, auth;
+		} s5_g = {5, 1, 0}, s5_g_resp = {0, 0, 0};
+
+		if (writen(d_sock_fd, &s5_g, sizeof(s5_g)) != sizeof(s5_g)) {
+			d_error = "Socket::connect::write (SOCKS5):";
+			d_error += strerror(errno);
+			return -1;
+		}
+
+		// auth not supported
+		if (read(d_sock_fd, &s5_g_resp, 2) != 2 || s5_g_resp.nauth != 0) {
+			d_error = "Socket::connect::read (SOCKS5):";
+			d_error += strerror(errno);
+			return -1;
+		}
+
+		struct socks5_req s5_c = {0}, s5_c_resp = {0};
+
+		s5_c.vers = 0x5;
+		s5_c.cmd = 1;
+		s5_c.atype = 3;		// DNS name, may also be IP string
+
+		s5_c.name.nlen = (uint8_t)host.size();
+		memcpy(s5_c.name.name, host.c_str(), s5_c.name.nlen);
+		uint16_t p = htons((uint16_t)stoul(port));
+		memcpy(s5_c.name.name + s5_c.name.nlen, &p, sizeof(p));
+
+		ssize_t req_len = 5*sizeof(uint8_t) + s5_c.name.nlen + sizeof(uint16_t);
+		if (writen(d_sock_fd, &s5_c, req_len) != req_len) {
+			d_error = "Socket::connect::write (SOCKS5):";
+			d_error += strerror(errno);
+			return -1;
+		}
+
+		// len for IPv4 bound SOCKS servers (see below)
+		ssize_t resp_len = 4*sizeof(uint8_t);	// + sizeof(s5_c_resp.v4);
+
+		// Workaround for buggy OpenSSH SOCKS5 server: Even if bound to IPv6 address,
+		// it will answer with a bound address of type IPv4. So we can't pre-compute the
+		// required response len :(
+		//if (d_family == AF_INET6)
+		//	resp_len = 4*sizeof(uint8_t) + sizeof(s5_c_resp.v6);
+
+		if (read(d_sock_fd, &s5_c_resp, resp_len) != resp_len || s5_c_resp.cmd != 0) {
+			d_error = "Socket::connect::read (SOCKS5):";
+			d_error += strerror(errno);
+			return -1;
+		}
+
+		ssize_t remain = 0;
+		if (s5_c_resp.atype == 1)	// IPv4
+			remain = sizeof(s5_c_resp.v4);
+		else
+			remain = sizeof(s5_c_resp.v6);
+
+		char dummy[sizeof(s5_c_resp.v4) + sizeof(s5_c_resp.v6)] = {0};
+		if (read(d_sock_fd, dummy, remain) != remain) {
+			d_error = "Socket::connect::read (SOCKS5):";
+			d_error += strerror(errno);
+			return -1;
+		}
 	}
 
 	return d_sock_fd;
@@ -186,8 +273,9 @@ map<string, int> tcp_nodes2sock, udp_nodes2sock;
 static int listen(int type, const string &ip, const string &port)
 {
 	int r = 0, sock_fd = -1;
-	addrinfo hint, *tai = nullptr;
-	memset(&hint, 0, sizeof(hint));
+
+	addrinfo hint = {0}, *tai = nullptr;
+	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
 	hint.ai_socktype = type;
 
 	if ((r = getaddrinfo(ip.c_str(), port.c_str(), &hint, &tai)) < 0)
@@ -245,8 +333,7 @@ static int connect(int type, const string &name, const string &port)
 	int r = 0, sock_fd = -1, one = 1;
 	socklen_t len = sizeof(one);
 
-	addrinfo hint, *tai = nullptr;
-	memset(&hint, 0, sizeof(hint));
+	addrinfo hint = {0}, *tai = nullptr;
 	hint.ai_socktype = type;
 	hint.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
 

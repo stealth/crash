@@ -16,7 +16,8 @@ An SSH alternative featuring:
 * not relying on any system auth frameworks such as PAM
 * can be entirely run as user, no need to setup config files
 * passive/active connects on both ends with most flexible
-  local/remote port binding possibilities
+  local/remote address+port binding possibilities
+* built-in SOCKS5 client side support when doing active connects
 * easy to port to embedded systems such as routers
 * quiet/hidden mode for secret administration and take-back
   functionality for owned boxes
@@ -101,33 +102,35 @@ runtime switches:
 stealth@linux ~> ./crashd -h
 
 
-crypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash
+crypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash
 
-Usage:  ./crashc [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]
-         [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]
-         [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]
-         [-R level] <-l user>
+Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
+	 [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]
+	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-w]
+	 [-x socks5://[ip]:port]
 
-         -6 -- use IPv6 instead of IPv4
-         -v -- be verbose
-         -H -- host to connect to; if omitted: passive connect (default)
-         -p -- port to connect/listen to; default is 2222
-         -P -- local port used in active connects (default is no bind)
-         -i -- private key used for authentication
-         -K -- folder of known host keys if it ends with '/';
-               absolute path of known-hosts file otherwise;
-               'none' to disable; default is .crash/
-         -c -- command to execute on remote host
-         -X -- run proxy on this IP (default 127.0.0.1)
-         -Y -- forward TLS port lport with SNI to ip:rport on remote site
-         -U -- forward UDP port lport to ip:rport on remote site
-         -T -- forward TCP port lport to ip:rport on remote site
-         -4 -- start SOCKS4 server on lport to forward TCP sessions
-         -5 -- start SOCKS5 server on lport to forward TCP sessions
-         -R -- traffic blinding level (0-6, default 1)
-         -D -- use DTLS transport (requires -S)
-         -S -- SNI to use
-         -l -- user to login as (no default!)
+	 -a -- always login if authenticated, despite false/nologin shells
+	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
+	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
+	 -q -- quiet mode, turns off logging and utmp entries
+	 -6 -- use IPv6 rather than IPv4
+	 -w -- wrap around PID to appear in system PID space (must be last arg!)
+	 -H -- host to connect to; if omitted: passive connect (default)
+	 -p -- port to connect to when active connect; default is 2222
+	 -L -- local [ip]:port used for binding ([0.0.0.0]:2222)
+	 -g -- file containing list of good IP/IP6's in D/DoS case (default off)
+	 -A -- authorized-key file for users if starts with '/'; folder inside ~
+	       containing authorized_keys file otherwise; 'self' means to use
+	       blob-extraction (see -e); default is .crash
+	 -k -- servers key file; default is ./serverkey.priv
+	 -c -- X509 certificate-file that belongs to serverkey (-k);
+	       default is ./serverkey.pub
+	 -t -- watch triggerfile for certain message (-m) before connect/listen
+	 -m -- wait with connect/listen until message in file (-t) is seen
+	 -N -- disable TCP/UDP port forwarding
+	 -D -- use DTLS transport (requires -S)
+	 -x -- use this SOCKS5 proxy when using active connect
+	 -S -- SNI to hide behind
 ```
 
 Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
@@ -135,10 +138,10 @@ skip `setuid()` calls, effectively being able to run as user. In this case, it o
 logins to that user then by checking login name's `uid` against current `euid`.
 Both, *crashc* and *crashd* can use active and passive connects. Whenever
 a host-argument `-H` is given, it uses active connect to this host
-and the belonging port `-p`. If `-H` is given, it also accepts
-`-P` which specifies the local port it has to bind to before doing active connect.
-Without `-H` it will listen for incoming connects. This way, from TCP view client
-and server role may be reversed, while still having `crashd` as the shell server.
+and the belonging port `-p`. It also accepts `-L` which specifies the local address and port it has
+to bind to, either before doing active connect (`-H`) or passively (no `-H` given).
+This way - from TCP point view - client and server role may be reversed, while still having
+`crashd` as the shell server.
 If `-w` is used it forks itself as **[kthreadd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons. As `-w` is overwriting main()'s `argv` array,
 it must appear last in the option list, otherwise option processing will not work
@@ -147,9 +150,9 @@ correctly. You can set the process name as `TITLE` def inside the `Makefile`.
 For testing, when you did `make keys` (next section), you can just run
 
 ```
-src $ ./crashd -U -p 2222
+src $ ./crashd -U -L [127.0.0.1]:2222
 ```
-and
+(or omit `-L` paramater to bind to the default port on any address) and
 
 ```
 src $ ./crashc -v -K none -i authkey.priv -H 127.0.0.1 -p 2222 -l $USER
@@ -348,7 +351,7 @@ async resolver functions which are embeddable and portable so I had to rely on
 if DNS problems exist. Thats why name resolving has to be enabled explicitly. `crashd`
 tries to minimize this potential problem with DNS lookup caches though, so in most
 situation it should just work painlessly.
-If you pass `-X IP-address` (must be the first argument), you can bind your local proxy
+If you pass `-X IP-address` (must come before any other proxy argument), you can bind your local proxy
 to an address different from `127.0.0.1`, so you can share the proxy in your local network.
 
 

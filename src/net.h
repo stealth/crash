@@ -47,6 +47,8 @@ namespace crash {
 class Socket {
 protected:
 	int d_sock_fd{-1}, d_family{PF_INET}, d_type{SOCK_STREAM};
+
+	std::string d_socks5_proxy{""}, d_socks5_port{""};
 	std::string d_error{""};
 
 	void create(int, int);
@@ -59,9 +61,11 @@ public:
 
 	int recycle();
 
+	int socks5(const std::string &, const std::string &);
+
 	int connect(const std::string &, const std::string &);
 
-	int blisten(unsigned short port, bool do_listen = 1);
+	int blisten(const std::string &, const std::string &, bool do_listen = 1);
 
 	bool is_good() { return d_sock_fd >= 0; };
 
@@ -141,39 +145,40 @@ int tcp_connect(const std::string &, const std::string &);
 int udp_connect(const std::string &, const std::string &);
 
 
-struct alignas(4) v4_tuple {
+struct alignas(1) v4_tuple {
 	in_addr dst;
 	uint16_t dport;
-};
+} __attribute__((packed));
 
 
-struct alignas(4) v6_tuple {
+struct alignas(1) v6_tuple {
 	in6_addr dst;
 	uint16_t dport;
-};
+} __attribute__((packed));
 
 
 struct alignas(1) name_tuple {
 	uint8_t nlen;
 	char name[255 + 2];	// +2 for dst port
-};
+} __attribute__((packed));
 
-struct socks5_req {
+
+struct alignas(1) socks5_req {
 	uint8_t vers, cmd, mbz, atype;
-	union alignas(4) {
+	union {
 		v4_tuple v4;
 		v6_tuple v6;
 		name_tuple name;
 	};
-};	// no __attribute__((packed)) needed, as its properly aligned
+} __attribute__((packed));
 
 
-struct socks4_req {
+struct alignas(1) socks4_req {
 	uint8_t ver, cmd;
 	uint16_t dport;
 	uint32_t dst;
 	uint8_t id;
-};
+} __attribute__((packed));
 
 
 }

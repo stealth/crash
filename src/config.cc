@@ -12,7 +12,7 @@ namespace config
 	uint32_t traffic_flags = crash::TRAFFIC_PAD1;
 
 	std::string keyfile = "./serverkey.priv", certfile = "./serverkey.pub";
-	std::string host = "", port = "2222", local_port = "", local_proxy_ip = "127.0.0.1", sni = "";
+	std::string host = "", port = "2222", laddr = "0.0.0.0", lport = "2222", local_proxy_ip = "127.0.0.1", sni = "";
 
 	std::string transport = "tls1";
 
@@ -40,6 +40,8 @@ namespace config
 	std::string tfile = "/var/log/messages", tmsg = "";
 
 	std::string good_ip_file = "";
+
+	std::string socks5_connect_proxy = "", socks5_connect_proxy_port = "";
 
 	std::map<std::string, std::string> tcp_listens, udp_listens;
 

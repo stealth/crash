@@ -13,10 +13,12 @@ namespace config
 
 	extern uint32_t traffic_flags;
 
-	extern std::string keyfile, certfile, host, port, local_port, local_proxy_ip, sni, transport;
+	extern std::string keyfile, certfile, host, port, laddr, lport, local_proxy_ip, sni, transport;
 	extern std::string server_keys, user_keys, user, cmd;
 
 	extern std::string tfile, tmsg, good_ip_file;
+
+	extern std::string socks5_connect_proxy, socks5_connect_proxy_port;
 
 	extern std::map<std::string, std::string> tcp_listens, udp_listens;
 

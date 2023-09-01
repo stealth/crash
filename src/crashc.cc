@@ -50,21 +50,21 @@ using namespace crash;
 
 void help(const char *p)
 {
-	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-P local port] [-i auth keyfile]\n"
+	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-L [ip]:port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
-	       "\t [-R level] [-N] <-l user>\n\n"
+	       "\t [-R level] [-N] [-x socks5://[ip]:port] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
-	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
-	       "\t -p -- port to connect/listen to; default is %s\n"
-	       "\t -P -- local port used in active connects (default is no bind)\n"
+	       "\t -H -- host to connect to; if omitted: passive (default)\n"
+	       "\t -p -- port to connect to; default is %s\n"
+	       "\t -L -- local [ip]:port used for binding (default [0.0.0.0]:0)\n"
 	       "\t -i -- private key used for authentication\n"
 	       "\t -K -- folder of known host keys if it ends with '/';\n"
 	       "\t       absolute path of known-hosts file otherwise;\n"
 	       "\t       'none' to disable; default is %s\n"
 	       "\t -c -- command to execute on remote host\n"
-	       "\t -X -- run proxy on this IP (default 127.0.0.1)\n"
+	       "\t -X -- if proxying is enabled, bind to this IP (default 127.0.0.1)\n"
 	       "\t -N -- enable DNS resolving in SOCKS5 proxy\n"
 	       "\t -Y -- forward TLS port lport with SNI to ip:rport on remote site\n"
 	       "\t -U -- forward UDP port lport to ip:rport on remote site\n"
@@ -74,6 +74,7 @@ void help(const char *p)
 	       "\t -R -- traffic blinding level (0-6, default 1)\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -S -- SNI to use\n"
+	       "\t -x -- use this SOCKS5 proxy when connecting\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
 }
@@ -87,7 +88,6 @@ void sig_int(int x)
 
 int main(int argc, char **argv)
 {
-
 	struct sigaction sa;
 	string ostr = "";
 
@@ -95,7 +95,10 @@ int main(int argc, char **argv)
 	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0}, sni[128] = {0};
 	uint16_t rport = 0;
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:P:X:Y:l:i:c:R:T:U:5:4:S:DN")) != -1) {
+	// in client mode we do not bind to a specific port by default
+	config::lport = "0";
+
+	while ((c = getopt(argc, argv, "6vhH:K:p:L:X:Y:l:i:c:R:T:U:5:4:S:x:DN")) != -1) {
 		switch (c) {
 		case 'N':
 			config::socks5_dns = 1;
@@ -104,6 +107,8 @@ int main(int argc, char **argv)
 			config::transport = "dtls1";
 			break;
 		case '6':
+			if (config::laddr == "0.0.0.0")
+				config::laddr = "::";
 			config::v6 = 1;
 			break;
 		case 'H':
@@ -112,8 +117,11 @@ int main(int argc, char **argv)
 		case 'p':
 			config::port = optarg;
 			break;
-		case 'P':
-			config::local_port = optarg;
+		case 'L':
+			if (sscanf(optarg, "[%127[^]]]:%15[0-9]", ip, lport) == 2) {
+				config::laddr = ip;
+				config::lport = lport;
+			}
 			break;
 		case 'X':
 			config::local_proxy_ip = optarg;
@@ -175,6 +183,12 @@ int main(int argc, char **argv)
 		case 'S':
 			config::sni = optarg;
 			break;
+		case 'x':
+			if (sscanf(optarg, "socks5://[%127[^]]]:%hu", ip, &rport) == 2) {
+				config::socks5_connect_proxy = ip;
+				config::socks5_connect_proxy_port = to_string(rport);
+			}
+			break;
 		default:
 			help(*argv);
 			return 0;
@@ -189,7 +203,8 @@ int main(int argc, char **argv)
 	sa.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &sa, nullptr);
 
-	if (config::user.length() == 0 || (config::transport == "dtls1" && config::sni.empty())) {
+	if (config::user.length() == 0 || (config::transport == "dtls1" && config::sni.empty()) ||
+	    (config::transport == "dtls1" && config::socks5_connect_proxy.size() > 0)) {
 		printf("\nMissing or invalid combination of options.\n");
 		help(*argv);
 		return 1;
@@ -227,8 +242,11 @@ int main(int argc, char **argv)
 
 	if (config::verbose) {
 		fprintf(stderr, "\ncrypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash\n\n%s\n", ostr.c_str());
-		fprintf(stderr, "crashc: starting crypted administration shell\ncrashc: connecting to %s:%s ...\n\n",
-		       config::host.c_str(), config::port.c_str());
+		fprintf(stderr, "crashc: starting crypted administration shell\n");
+		if (!config::host.empty())
+			fprintf(stderr, "crashc: connecting to [%s]:%s ...\n\n", config::host.c_str(), config::port.c_str());
+		else
+			fprintf(stderr, "crashc: listen for back-connect on [%s]:%s ...\n\n", config::laddr.c_str(), config::lport.c_str());
 	}
 	client_session csess(config::transport, config::sni);
 	if (csess.setup() < 0) {
