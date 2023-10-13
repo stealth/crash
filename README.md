@@ -35,6 +35,8 @@ An SSH alternative featuring:
 * SNI hiding mode
 * can use UDP transport mode with DTLS and added reliability and flow-control
   layer
+* transparent roaming support with DTLS client sessions
+* suspend/resume support with DTLS client sessions
 
 Build
 -----
@@ -75,6 +77,16 @@ before `make` in order to generate DH parameters before the build. Thats not str
 as of TLS 1.3, since the Kex will most likely chose one of the ECDH variants, but if you customize
 your setup, it is recommended to generate your own DH params.
 
+
+Legacy builds
+-------------
+
+If `make` detects that TLSv1.3 is not available on the system or `TLS_COMPAT_DOWNGRADE` is
+defined, the binaries are built with TLSv1.2 only. This is to allow using it on legacy
+systems when no other options are available. Obviosuly, the built binaries are not
+compatible to normal builds, but include full support of all other features.
+
+
 OpenSSL3 builds
 ---------------
 
@@ -104,17 +116,18 @@ stealth@linux ~> ./crashd -h
 
 crypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash
 
-Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
+
+Usage:	./src/crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
 	 [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]
-	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-w]
-	 [-x socks5://[ip]:port]
+	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]
+	 [-x socks5://[ip]:port] [-w]
 
 	 -a -- always login if authenticated, despite false/nologin shells
 	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
 	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
 	 -q -- quiet mode, turns off logging and utmp entries
 	 -6 -- use IPv6 rather than IPv4
-	 -w -- wrap around PID to appear in system PID space (must be last arg!)
+	 -w -- setproctitle to `[kthreadd]` (must be last arg!)
 	 -H -- host to connect to; if omitted: passive connect (default)
 	 -p -- port to connect to when active connect; default is 2222
 	 -L -- local [ip]:port used for binding ([0.0.0.0]:2222)
@@ -130,6 +143,7 @@ Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
 	 -N -- disable TCP/UDP port forwarding
 	 -D -- use DTLS transport (requires -S)
 	 -x -- use this SOCKS5 proxy when using active connect
+	 -R -- allow clients to roam sessions
 	 -S -- SNI to hide behind
 ```
 
@@ -354,6 +368,8 @@ situation it should just work painlessly.
 If you pass `-X IP-address` (must come before any other proxy argument), you can bind your local proxy
 to an address different from `127.0.0.1`, so you can share the proxy in your local network.
 
+There is also a client side SOCKS5 support available when using *crashc* with `-x`.
+
 
 proxying based on SNI
 ---------------------
@@ -382,6 +398,34 @@ and record layer without the need to fragment the packet, as DTLS honors packet 
 DTLS mode is still experimental (although working stable) and will switch to DTLS 1.3 as soon
 as it is implemented widely (DTLS 1.3 RFC was just finished 2022).
 
+
+Suspend/Resume/Roaming
+----------------------
+
+This is an experimental feature, although working stable.
+
+When using DTLS sessions and *crashd* is started with `-R`, you will get the following:
+
+* transparent roaming of the client sessions - including existing SOCKS connections - which
+  allows to switch underlying physical layer, VPN, Interface, NAT or IP address without
+  even noticing it
+* *crashc* may be terminated via `SIGTERM`, so it will dump the session to a ticket
+  file (`-t`) which can later be resumed from by passing the correct dst IP:port and ticket
+  but w/o the need to authenticate again (no `-i`) - with full roaming support
+
+In the 2nd case, **the ticket file will not be encrypted**, so make sure you never leak it.
+This allows you to switch off your laptop and continue working from elsewhere or even
+share the ticket to another admin who then continues your session.
+
+One thing is special with regards to bound server ports when using roaming: Due to
+UDP internals, the next open session for a followup "connect" will be on the next
+free port in the range of `[port, port + 1000]` and not on the same port as when using TCP.
+This needs to be as with roaming we cannot actually call `connect()` to virtually create a
+connected tuple, as the next session packet can arrive from anywhere - not just from the
+originating IP as happens with TCP. So when you start the server with `-p 2222` and one
+roaming session already exists, the next one needs to "connect" to port `2223`. If the
+session at port `2222` is finished (not suspended, but really finished), port `2222`
+will become available again to the next client.
 
 Mitigating traffic analysis
 ---------------------------
