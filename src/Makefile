@@ -8,8 +8,16 @@ LIBS=
 CXXFLAGS=
 DEFS=-DTITLE="\"[kthreadd]\""
 
+# comment in if you want to have server and client support TLS 1.2 in order
+# to use aged systems that have no TLS 1.3 libcrypto support, which is otherwise
+# the minimum TLS version
+#DEFS+=-DTLS_COMPAT_DOWNGRADE
+
+# Do not enable. !For debugging only!
+# -DUSE_CCIPHERS="\"NULL@SECLEVEL=0\"" -DUSE_SCIPHERS="\"NULL@SECLEVEL=0\""
 
 # comment out if you want DTLSv1_listen() "DoS protection" for OpenSSL-3 or LibreSSL-3
+# do not comment out if you want suspend/resume
 DEFS+=-DNO_DTLS_LISTEN
 
 #SSL=/opt/ssl/libressl-3.7.0
@@ -73,13 +81,16 @@ keys:
 	@echo "to login."
 	@echo
 
-crashc: net.o misc.o crashc.o config.o session.o csession.o global.o
-	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o session.o csession.o $(LIBS) $(LDFLAGS) -o crashc
+crashc: net.o misc.o crashc.o config.o session.o csession.o global.o missing.o
+	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o session.o csession.o missing.o $(LIBS) $(LDFLAGS) -o crashc
 	$(STRIP) crashc
 
-crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o
-	$(LD) server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o $(LIBS) $(LDFLAGS) -o crashd
+crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o
+	$(LD) server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o $(LIBS) $(LDFLAGS) -o crashd
 	$(STRIP) crashd
+
+missing.o: missing.cc
+	$(CXX) $(CXXFLAGS) -c missing.cc
 
 iobox.o: iobox.cc
 	$(CXX) $(CXXFLAGS) -c iobox.cc

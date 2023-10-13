@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,7 @@
  */
 #include <map>
 #include <string>
+#include <memory>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -118,9 +119,8 @@ Server::Server(const std::string &t, const std::string &sni)
 
 Server::~Server()
 {
-	// OpenSSL bug workaround
-	//if (d_ssl_ctx)
-	//	SSL_CTX_free(d_ssl_ctx);
+	if (d_ssl_ctx)
+		SSL_CTX_free(d_ssl_ctx);
 	delete d_sock;
 }
 
@@ -162,6 +162,16 @@ int Server::setup()
 
 	long op = SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET|SSL_OP_NO_QUERY_MTU;
 
+	if (d_transport == "dtls1") {
+		if (SSL_CTX_set_session_id_context(d_ssl_ctx, reinterpret_cast<const unsigned char *>("crashd"), 6) != 1) {
+			d_err = "Server::setup::SSL_CTX_set_session_id_context():";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+		SSL_CTX_set_timeout(d_ssl_ctx, 60*60*24*365);	// 1y
+		SSL_CTX_set_session_cache_mode(d_ssl_ctx, SSL_SESS_CACHE_NO_AUTO_CLEAR|SSL_SESS_CACHE_SERVER);
+	}
+
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
 #endif
@@ -172,7 +182,12 @@ int Server::setup()
 		return -1;
 	}
 
+#if !(defined TLS1_3_VERSION) or defined TLS_COMPAT_DOWNGRADE
+#warning "TLS1_3_VERSION not defined! Building compat version to support aged systems. This produces island-binaries incompatible to normal builds."
+	int min_vers = TLS1_2_VERSION;
+#else
 	int min_vers = TLS1_3_VERSION;
+#endif
 
 	if (d_transport == "dtls1") {
 		min_vers = DTLS1_2_VERSION;
@@ -271,13 +286,15 @@ int Server::loop()
 				peer_fd = dup(d_sock_fd);
 
 				// in UDP mode, set the address where data is sent from and received from
-				// via read/write and all other datagrams are ignored on receipt
-				if (connect(peer_fd, from, flen) != 0) {
+				// via read/write and all other datagrams are ignored on receipt. When roaming is allowed,
+				// the underlying BIO will handle it
+				if (!config::allow_roam && connect(peer_fd, from, flen) != 0) {
 					msg = "Failed to set default dst of new UDP connection.";
 					syslog().log(msg);
 					close(peer_fd);
 					continue;
 				}
+
 			} else {
 				last_accept = now;
 				peer_fd = accept(d_sock_fd, from, &flen);
@@ -317,7 +334,7 @@ int Server::loop()
 				msg += dst;
 				syslog().log(msg);
 
-				server_session *s = new (nothrow) server_session(peer_fd, d_transport, d_sni);
+				server_session *s = new (nothrow) server_session(peer_fd, d_transport, d_sni, string(reinterpret_cast<char *>(from), flen));
 				if (!s) {
 					syslog().log("out of memory");
 					close(peer_fd);
@@ -339,10 +356,34 @@ int Server::loop()
 
 			// DGRAM sockets must be closed and re-bound, as the connect() on dup-ed peer_fd also changed state
 			// of d_sock_fd. recycle() handles that.
-			if (d_sock->recycle() < 0 || (d_sock_fd = d_sock->blisten(config::laddr, config::lport)) < 0) {
+			if (d_sock->recycle() < 0) {
 				d_err = "Server::loop::";
 				d_err += d_sock->why();
 				return -1;
+			}
+
+			auto lp = stoul(config::lport);
+			for (auto p = lp;; ++p) {
+
+				if (p - lp > 1000) {
+					sleep(1);
+					p = lp;
+				}
+
+				// when roaming is allowed, the next server session to be opened will be on lport+1,
+				// as we were not calling connect() on the socket to fix the peer IP and therefore
+				// we would get duped packets if multiple clients try to share same IP:port destination
+				// without us fixing them by connect(). The loop makes sure we will be re-using original lport
+				// if it is free again and cycle through a list of [lport, lport + 1000]
+
+				if ((d_sock_fd = d_sock->blisten(config::laddr, to_string(p), 1, !config::allow_roam)) < 0) {
+					if (!config::allow_roam) {
+						d_err = "Server::loop::";
+						d_err += d_sock->why();
+						return -1;
+					}
+				} else
+					break;	// success
 			}
 		}
 
@@ -360,7 +401,7 @@ int Server::loop()
 			d_err += d_sock->why();
 			return -1;
 		}
-		server_session *s = new (nothrow) server_session(d_sock_fd, d_transport, d_sni);
+		server_session *s = new (nothrow) server_session(d_sock_fd, d_transport, d_sni, "");
 		if (s)
 			s->handle(d_ssl_ctx);
 		delete s;

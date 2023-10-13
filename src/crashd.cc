@@ -32,6 +32,7 @@
 
 #include <iostream>
 #include <cstdio>
+#include <memory>
 #include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -56,14 +57,14 @@ void help(const char *p)
 {
 	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]\n"
 	       "\t [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]\n"
-	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N]\n"
+	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]\n"
 	       "\t [-x socks5://[ip]:port] [-w]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
 	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
 	       "\t -q -- quiet mode, turns off logging and utmp entries\n"
 	       "\t -6 -- use IPv6 rather than IPv4\n"
-	       "\t -w -- wrap around PID to appear in system PID space (must be last arg!)\n"
+	       "\t -w -- setproctitle to `%s` (must be last arg!)\n"
 	       "\t -H -- host to connect to; if omitted: passive connect (default)\n"
 	       "\t -p -- port to connect to when active connect; default is %s\n"
 	       "\t -L -- local [ip]:port used for binding ([%s]:%s)\n"
@@ -79,8 +80,9 @@ void help(const char *p)
 	       "\t -N -- disable TCP/UDP port forwarding\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -x -- use this SOCKS5 proxy when using active connect\n"
+	       "\t -R -- allow clients to roam sessions\n"
 	       "\t -S -- SNI to hide behind\n\n",
-	       p, config::port.c_str(), config::laddr.c_str(), config::lport.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
+	       p, TITLE, config::port.c_str(), config::laddr.c_str(), config::lport.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
 	       config::certfile.c_str());
 }
 
@@ -162,7 +164,7 @@ int main(int argc, char **argv)
 
 	char ip[128] = {0}, lport[16] = {0};
 
-	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:DUweaS:N")) != -1) {
+	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:DUweaS:NR")) != -1) {
 		switch (c) {
 		case 'D':
 			config::transport = "dtls1";
@@ -227,6 +229,9 @@ int main(int argc, char **argv)
 		case 'N':
 			config::no_net = 1;
 			break;
+		case 'R':
+			config::allow_roam = 1;
+			break;
 		case 'x':
 			if (sscanf(optarg, "socks5://[%127[^]]]:%15[0-9]", ip, lport) == 2) {
 				config::socks5_connect_proxy = ip;
@@ -241,6 +246,11 @@ int main(int argc, char **argv)
 
 	if (config::transport == "dtls1" && config::sni.empty()) {
 		printf("Config error. DTLS option requires SNI. Exiting.\n\n");
+		return 1;
+	}
+
+	if (config::transport == "tls1" && config::allow_roam) {
+		printf("Config error. TCP/TLS sessions cannot roam. Exiting.\n\n");
 		return 1;
 	}
 
@@ -264,19 +274,6 @@ int main(int argc, char **argv)
 
 	if (fork() != 0)
 		return 0;
-
-	// Wrap into system PID-space. Tested only on Linux!
-	if (config::wrap) {
-		pid_t opid = getpid();
-		pid_t pid;
-		for (;;) {
-			pid = fork();
-			if (pid > 0)
-				exit(0);
-			if (getpid() < opid)
-				break;
-		}
-	}
 
 	global::crashd_pid = getpid();
 

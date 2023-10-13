@@ -46,6 +46,7 @@ extern "C" {
 #include "net.h"
 #include "config.h"
 #include "session.h"
+#include "missing.h"
 
 
 namespace crash {
@@ -58,6 +59,7 @@ session::session(const string &t, const string &sni)
 		d_type = SOCK_DGRAM;
 		d_chunk_size = UDP_CHUNK_SIZE;
 		d_poll_to.max = d_poll_to.next = UDP_POLL_TO;
+		d_bio_peer = BIO_ADDR_new();
 	}
 	d_now = time(nullptr);
 }
@@ -65,6 +67,14 @@ session::session(const string &t, const string &sni)
 
 session::~session()
 {
+	if (d_bio_peer)
+		BIO_ADDR_free(d_bio_peer);
+
+	// OK to free d_bio, as we up_refed +1 for ourself just
+	// after creating and BIO_free_all() as called on SSL_free()
+	// will only free (downref) its copies
+	BIO_free(d_bio);
+
 	if (d_ssl) {
 		SSL_shutdown(d_ssl);
 		SSL_free(d_ssl);
@@ -76,11 +86,6 @@ session::~session()
 
 	if (d_type == SOCK_STREAM)
 		shutdown(d_peer_fd, SHUT_RDWR);
-
-	/* SSL_free() will also free SSL Ctx
-	if (d_ssl_ctx)
-		SSL_CTX_free(d_ssl_ctx);
-	*/
 
 	if (d_fd2state) {
 		for (int i = 3; i <= d_max_fd; ++i) {
@@ -182,7 +187,7 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 			}
 
 			// In dgram case the data is immediately removed from queueing by tx_string(),
-			// since SSL socket will be non-blocking and not writing partial
+			// since SSL socket will be blocking and not writing partial
 			// (it is either written at once or not at all) and the final dgram will be kept
 			// in d_tx_map<> for a possible resend. This makes modding the ovec[] with :PN:...
 			// and pads spanning multiple vector entries unnecessary.

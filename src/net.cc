@@ -105,10 +105,14 @@ Socket::~Socket()
 }
 
 
-int Socket::blisten(const string &laddr, const string &lport, bool do_listen)
+int Socket::blisten(const string &laddr, const string &lport, bool do_listen, bool do_reuse)
 {
-	int one = 1, r = 0;
-	setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	int r = 0;
+
+	if (do_reuse) {
+		int one = 1;
+		setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	}
 
 	struct addrinfo hint = {0}, *tai = nullptr;
 

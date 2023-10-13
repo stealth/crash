@@ -51,10 +51,12 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 extern "C" {
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 }
 #include <iostream>
@@ -89,30 +91,26 @@ static void sess_sig_chld(int x)
 }
 
 
-server_session::server_session(int fd, const string &transport, const string &sni)
+server_session::server_session(int fd, const string &transport, const string &sni, const string &from)
 	: session(transport, sni)
 {
 
 	d_peer_fd = fd;
 
-	struct sockaddr_in sin4;
-	struct sockaddr_in6 sin6;
-	socklen_t slen = sizeof(struct sockaddr_in);
-	struct sockaddr *sin = reinterpret_cast<struct sockaddr *>(&sin4);
-
-	if (config::v6) {
-		slen = sizeof(struct sockaddr_in6);
-		sin = reinterpret_cast<struct sockaddr *>(&sin6);
+	if (config::v6)
 		d_family = AF_INET6;
-	}
 
-	if (getpeername(d_peer_fd, sin, &slen) < 0)
-		return;
-
-	if (d_family == AF_INET6) {
-		inet_ntop(AF_INET6, &sin6.sin6_addr, d_peer_ip, sizeof(d_peer_ip));
+	// in active connect case, 'from' is empty, as there was no accept/recv and the peer is config::host
+	if (from.empty()) {
+		d_peer_ip = config::host;
 	} else {
-		inet_ntop(AF_INET, &sin4.sin_addr, d_peer_ip, sizeof(d_peer_ip));
+
+		char dst[128] = {0};
+
+		if (getnameinfo(reinterpret_cast<const sockaddr *>(from.c_str()), from.size(), dst, sizeof(dst) - 1, nullptr, 0, NI_NUMERICHOST|NI_NUMERICSERV) != 0)
+			d_peer_ip = "?.?.?.?";
+		else
+			d_peer_ip = dst;
 	}
 
 	if (d_type == SOCK_DGRAM)
@@ -127,8 +125,21 @@ server_session::server_session(int fd, const string &transport, const string &sn
 		d_net_cmd_flags = NETCMD_SEND_ALLOW;
 
 #if !defined LIBRESSL_VERSION_NUMBER && !defined BORINGSSL_API_VERSION
+	// only happens in passive case for DTLS, so no distinguish for 'from' needs to be done
 	d_dlisten_param = BIO_ADDR_new();
-	BIO_ADDR_rawmake(d_dlisten_param, d_family, sin, slen, d_family == AF_INET6 ? sin6.sin6_port : sin4.sin_port);
+	uint16_t fport = 0;
+	const void *where = nullptr;
+	size_t wlen = 0;
+	if (d_family == AF_INET) {
+		fport = reinterpret_cast<const sockaddr_in *>(from.c_str())->sin_port;
+		where = &(reinterpret_cast<const sockaddr_in *>(from.c_str()))->sin_addr;
+		wlen = sizeof(in_addr);
+	} else {
+		fport = reinterpret_cast<const sockaddr_in6 *>(from.c_str())->sin6_port;
+		where = &(reinterpret_cast<const sockaddr_in6 *>(from.c_str()))->sin6_addr;
+		wlen = sizeof(in6_addr);
+	}
+	BIO_ADDR_rawmake(d_dlisten_param, d_family, where, wlen, fport);
 #endif
 }
 
@@ -138,6 +149,7 @@ server_session::~server_session()
 #if !defined LIBRESSL_VERSION_NUMBER && !defined BORINGSSL_API_VERSION
 	BIO_ADDR_free(d_dlisten_param);
 #endif
+
 }
 
 
@@ -375,6 +387,10 @@ int server_session::authenticate()
 
 int server_session::handle(SSL_CTX *ssl_ctx)
 {
+
+	// not owning
+	d_ssl_ctx0 = ssl_ctx;
+
 	struct itimerval iti;
 
 	memset(&iti, 0, sizeof(iti));
@@ -397,11 +413,29 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		return -1;
 	}
 
-	SSL_set_fd(d_ssl, d_peer_fd);
+	if (config::allow_roam && d_type == SOCK_DGRAM)
+		d_bio = BIO_new_dgram(d_peer_fd, BIO_NOCLOSE);
+	else
+		d_bio = BIO_new_socket(d_peer_fd, BIO_NOCLOSE);
 
-	// DTLS_set_link_mtu(d_ssl, MTU) for openssl
+	// +1 for ourself to always have a valid d_bio in case of suspend/resume
+	// where we call SSL_free()
+	BIO_up_ref(d_bio);
+
+	// +1 for set0 (as told by manpage)
+	BIO_up_ref(d_bio);
+
+#ifdef LIBRESSL_VERSION_NUMBER
+	SSL_set_bio(d_ssl, d_bio, d_bio);
+#else
+	SSL_set0_rbio(d_ssl, d_bio);
+	SSL_set0_wbio(d_ssl, d_bio);
+#endif
+
 	if (d_type == SOCK_DGRAM) {
+
 #ifndef BORINGSSL_API_VERSION
+		// DTLS_set_link_mtu(d_ssl, MTU) for openssl
 		SSL_ctrl(d_ssl, SSL_CTRL_SET_MTU, MTU, 0);
 #endif
 		// DTLSv1_listen() seems to be buggy in older openssl and just hangs
@@ -431,6 +465,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		}
 	}
 
+	if (config::allow_roam && d_type == SOCK_DGRAM)
+		BIO_ctrl(d_bio, BIO_CTRL_DGRAM_GET_PEER, 0, d_bio_peer);
+
+
 	// Get our own X509 for authentication input. This has moved below
 	// SSL_accept() since OSX ships with buggy OpenSSL that segfaults
 	// with nullptr ptr access if the SSL object is not connected: search for
@@ -441,8 +479,9 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
+	// as per manpage, `cert` must not be freed
 	d_pubkey = X509_get_pubkey(cert);
-	X509_free(cert);
+
 	if (!d_pubkey) {
 		d_err = "server_session::handle::X509_get_pubkey:";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
@@ -757,7 +796,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 
 				d_pfds[i].events = POLLIN;
 
-				if (!tx_empty(i)) {
+				if ((revents & POLLOUT) && !tx_empty(i)) {
 
 					// obtains properly padded and max chunk-sized string
 					sequence_t seq = 0;
@@ -766,6 +805,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 					// keep sequenced packets for possible resend requests. 'seq' equals d_flow.tx_sequence
 					if (d_type == SOCK_DGRAM && seq != 0)
 						d_tx_map[d_flow.tx_sequence++] = bk_str;
+
+					// in DTLS case, set peer to that we known were the last good recv from
+					if (config::allow_roam && d_type == SOCK_DGRAM)
+						BIO_ctrl(d_bio, BIO_CTRL_DGRAM_SET_PEER, 0, d_bio_peer);
 
 					ssize_t n = SSL_write(d_ssl, sv.c_str(), sv.size());
 					switch (SSL_get_error(d_ssl, n)) {
@@ -790,12 +833,9 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 					d_last_ssl_qlen = tx_size(i);
 					if (ssl_read_wants_write || d_last_ssl_qlen > 0)
 						d_pfds[i].events |= POLLOUT;
-
-					if (!(revents & POLLIN) && !ssl_read_wants_write)
-						continue;
 				}
 
-				if (revents & (POLLIN|POLLOUT)) {
+				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 
 					ssl_read_wants_write = 0;
 
@@ -821,6 +861,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 
 					if (n > 0)
 						d_fd2state[i].ibuf += string(rbuf, n);
+
+					// on successfull DTLS read, obtain last known address of peer sender
+					if (config::allow_roam && d_type == SOCK_DGRAM)
+						BIO_ctrl(d_bio, BIO_CTRL_DGRAM_GET_PEER, 0, d_bio_peer);
 
 					while (handle_input(i) > 0);
 				}
@@ -918,6 +962,106 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 }
 
 
+int server_session::suspend(const string &cmd)
+{
+
+	unique_ptr<SSL_SESSION, decltype(&SSL_SESSION_free)> old_sess{
+		SSL_get1_session(d_ssl),
+		SSL_SESSION_free
+	};
+	if (!old_sess.get())
+		return -1;
+
+	unsigned int old_idlen = 0;
+	auto old_id = SSL_SESSION_get_id(old_sess.get(), &old_idlen);
+
+	// smells fishy?
+	if (old_idlen < 32 || old_idlen > 4096)
+		return -1;
+
+	string old_id_s = string(reinterpret_cast<const char *>(old_id), old_idlen);
+
+	// loop until SSL_accept() returns the correctly resumed session (kidz might
+	// try invalid tickets).
+	// NEVER return or break from this loop, unless the new session is verified OK.
+	for (;;) {
+
+		SSL_set_quiet_shutdown(d_ssl, 1);
+		SSL_shutdown(d_ssl);
+
+		// This will also free the bio, but we have +1 ref for ourself,
+		// so we can re-set them just below
+		SSL_free(d_ssl);
+		if (!(d_ssl = SSL_new(d_ssl_ctx0))) {
+			syslog().log("Failed to obtain new SSL object upon suspend.");
+			_exit(1);
+		}
+
+		// Preferably we want to use SSL_shutdown(); SSL_clear(); so a new
+		// SSL_accept() could be made on the same `d_ssl`, but see man-page
+		// on the side-effects and it breaks depending on library version. So
+		// we have to go the whole SSL_free(); SSL_new(); ... path :/
+		SSL_set_session(d_ssl, old_sess.get());
+
+		BIO_up_ref(d_bio);
+		BIO_up_ref(d_bio);
+#ifdef LIBRESSL_VERSION_NUMBER
+		SSL_set_bio(d_ssl, d_bio, d_bio);
+#else
+		SSL_set0_rbio(d_ssl, d_bio);
+		SSL_set0_wbio(d_ssl, d_bio);
+#endif
+
+#ifndef BORINGSSL_API_VERSION
+		// DTLS_set_link_mtu(d_ssl, MTU) for openssl
+		SSL_ctrl(d_ssl, SSL_CTRL_SET_MTU, MTU, 0);
+#endif
+		syslog().log("DTLS session suspended.");
+		sleep(1);
+		if (SSL_accept(d_ssl) <= 0)
+			continue;
+
+		auto new_sess = SSL_get1_session(d_ssl);
+
+		if (!new_sess || SSL_session_reused(d_ssl) != 1) {
+			if (new_sess)
+				SSL_SESSION_free(new_sess);
+			syslog().log("No reuse. Failed to resume DTLS session.");
+			continue;
+		}
+
+		if (SSL_CTX_sess_number(d_ssl_ctx0) != 1) {
+			SSL_CTX_remove_session(d_ssl_ctx0, new_sess);	// also calls SSL_SESSION_free()
+			syslog().log("More than one session. Failed to resume DTLS session.");
+			continue;
+		}
+
+		unsigned int new_idlen = 0;
+		auto new_id = SSL_SESSION_get_id(new_sess, &new_idlen);
+
+		if (old_idlen != new_idlen) {
+			SSL_SESSION_free(new_sess);
+			continue;
+		}
+
+		string new_id_s = string(reinterpret_cast<const char *>(new_id), new_idlen);
+
+		SSL_SESSION_free(new_sess);
+
+		if (CRYPTO_memcmp(old_id_s.c_str(), new_id_s.c_str(), old_id_s.size()) == 0)
+			break;	// success
+
+		syslog().log("SessionID mismatch. Failed to resume DTLS session.");
+	}
+
+	syslog().log("DTLS session resumed.");
+
+	// reset RX/TX seq counters
+	d_flow.reset();
+	return 0;
+}
+
+
 int server_session::handle_input(int i)
 {
 	int r = 0;
@@ -953,6 +1097,15 @@ int server_session::handle_input(int i)
 	// remote peer has closed stdin
 	} else if (cmd.find("C:CL:0", 6) == 6) {
 		d_stdin_closed = 1;
+
+	// peer suspended session
+	} else if (cmd.find("C:SPND:0", 6) == 6) {
+		if (d_type == SOCK_DGRAM && config::allow_roam) {
+			if (suspend(cmd) < 0)
+				syslog().log("Suspend request received but failed to do so.");
+			cmd.clear();
+			return 0;
+		}
 	} else {
 		// valid len/packet format, but unrecognized cmd. Maybe a chained command for
 		// this->session::handle_input(), so keep it where it is and let next iteration handle it

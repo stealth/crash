@@ -32,6 +32,7 @@
 
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <errno.h>
 #include <poll.h>
 #include <string>
@@ -39,10 +40,13 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/resource.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <termios.h>
 
 #include "net.h"
@@ -75,10 +79,30 @@ string ciphers = "!LOW:!EXP:!MD5:!CAMELLIA:!RC4:!MEDIUM:!DES:!ADH:!3DES:AES256:A
 #endif
 
 
+volatile bool do_suspend = 0;
+
+void sig_suspend(int x)
+{
+	do_suspend = 1;
+}
+
+
+client_session::client_session(const string &ticket, const string &transport, const string &sni)
+	 : session(transport, sni)
+{
+	if (config::v6)
+		d_family = AF_INET6;
+
+	d_ticket_file = ticket;
+}
+
+
 client_session::~client_session()
 {
 	if (d_has_tty)
 		tcsetattr(0, TCSANOW, &d_old_tattr);
+
+	SSL_CTX_free(d_ssl_ctx);
 }
 
 
@@ -110,7 +134,13 @@ int client_session::setup()
 		return -1;
 	}
 
+	SSL_CTX_set_session_id_context(d_ssl_ctx, reinterpret_cast<const unsigned char *>("crashd"), 6);
+	SSL_CTX_set_timeout(d_ssl_ctx, 60*60*24*365);   // 1y
+	SSL_CTX_set_session_cache_mode(d_ssl_ctx, SSL_SESS_CACHE_NO_AUTO_CLEAR|SSL_SESS_CACHE_SERVER);
+
 	long op = SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET|SSL_OP_NO_QUERY_MTU;
+
+	if (d_type == SOCK_DGRAM)
 
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
@@ -122,7 +152,12 @@ int client_session::setup()
 		return -1;
 	}
 
+#if !(defined TLS1_3_VERSION) or defined TLS_COMPAT_DOWNGRADE
+#warning "TLS1_3_VERSION not defined! Building compat version to support aged systems. This produces island-binaries incompatible to normal builds."
+	int min_vers = TLS1_2_VERSION;
+#else
 	int min_vers = TLS1_3_VERSION;
+#endif
 
 	if (d_type == SOCK_DGRAM)
 		min_vers = DTLS1_2_VERSION;
@@ -154,20 +189,24 @@ int client_session::setup()
 	if (d_sni.size())
 		SSL_set_tlsext_host_name(d_ssl, d_sni.c_str());
 
-	FILE *fstream = fopen(config::user_keys.c_str(), "r");
-	if (!fstream) {
-		d_err = "client_session::authenticate::fopen:";
-		d_err += strerror(errno);
-		return -1;
-	}
+	// only need to load auth keys if session is not resumed
+	if (access(d_ticket_file.c_str(), R_OK) != 0) {
 
-	d_privkey = PEM_read_PrivateKey(fstream, nullptr, nullptr, nullptr);
-	if (!d_privkey) {
-		d_err = "client_session::setup::PEM_read_PrivateKey:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
+		FILE *fstream = fopen(config::user_keys.c_str(), "r");
+		if (!fstream) {
+			d_err = "client_session::setup::fopen:";
+			d_err += strerror(errno);
+			return -1;
+		}
+
+		d_privkey = PEM_read_PrivateKey(fstream, nullptr, nullptr, nullptr);
+		if (!d_privkey) {
+			d_err = "client_session::setup::PEM_read_PrivateKey:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+		fclose(fstream);
 	}
-	fclose(fstream);
 
 	unique_ptr<Socket> sock(nullptr);
 	if (config::v6)
@@ -196,20 +235,53 @@ int client_session::setup()
 		//close(sock_fd);
 	} else if (config::host.length() > 0) {
 
-		if (sock->blisten(config::laddr, config::lport, 0) < 0) {
+		int bl_fd = 0;
+
+		if ((bl_fd = sock->blisten(config::laddr, config::lport, 0)) < 0) {
 			d_err = "client_session::setup::";
 			d_err += sock->why();
 			return -1;
 		}
 
-		if (!config::socks5_connect_proxy.empty())
-			sock->socks5(config::socks5_connect_proxy, config::socks5_connect_proxy_port);
+		if (d_transport == "tls1") {
+			if (!config::socks5_connect_proxy.empty() && d_transport == "tls1")
+				sock->socks5(config::socks5_connect_proxy, config::socks5_connect_proxy_port);
 
-		// need to dup, since we are owner of d_peer_fd but connect() returns sock owned fd
-		if ((d_peer_fd = dup(sock->connect(config::host, config::port))) < 0) {
-			d_err = "client_session::setup::connect:";
-			d_err += sock->why();
-			return -1;
+			// need to dup, since we are owner of d_peer_fd but connect() returns sock owned fd
+			if ((d_peer_fd = dup(sock->connect(config::host, config::port))) < 0) {
+				d_err = "client_session::setup::connect:";
+				d_err += sock->why();
+				return -1;
+			}
+		} else {
+			// no connect() on DGRAM, but need to set d_bio_peer address
+			d_peer_fd = dup(bl_fd);
+
+			addrinfo hint = {0}, *tai = nullptr;
+			hint.ai_socktype = SOCK_DGRAM;
+			hint.ai_family = d_family;
+			hint.ai_flags = AI_NUMERICSERV;
+
+			int r = 0;
+			if ((r = getaddrinfo(config::host.c_str(), config::port.c_str(), &hint, &tai)) != 0) {
+				d_err = "client_session::setup::getaddrinfo:";
+				d_err += gai_strerror(r);
+				return -1;
+			}
+			const void *where = nullptr;
+			size_t wlen = 0;
+			uint16_t wport = 0;
+			if (d_family == AF_INET) {
+				where = &(reinterpret_cast<const sockaddr_in *>(tai->ai_addr)->sin_addr);
+				wport = reinterpret_cast<const sockaddr_in *>(tai->ai_addr)->sin_port;
+				wlen = sizeof(in_addr);
+			} else {
+				where = &(reinterpret_cast<const sockaddr_in6 *>(tai->ai_addr)->sin6_addr);
+				wport = reinterpret_cast<const sockaddr_in6 *>(tai->ai_addr)->sin6_port;
+				wlen = sizeof(in6_addr);
+			}
+			BIO_ADDR_rawmake(d_bio_peer, d_family, where, wlen, wport);
+			freeaddrinfo(tai);
 		}
 	} else {
 		d_err = "client_session::setup: Not possible to do passive connect in UDP client mode.";
@@ -270,6 +342,9 @@ int client_session::check_server_key()
 		return -1;
 	}
 	d_pubkey = X509_get_pubkey(cert);
+
+	// As per manpage, certs returned by SSL_get_peer_certificate() need to be freed,
+	// unlike those returned by SSL_get_certificate().
 	X509_free(cert);
 	if (!d_pubkey) {
 		d_err = "client_session::check_server_key: FAILED! Peer offered invalid pubkey!";
@@ -436,11 +511,49 @@ int client_session::authenticate()
 }
 
 
+int client_session::suspend(const string &)
+{
+	auto session = SSL_get_session(d_ssl);
+	if (!session) {
+		d_err = "client_session::suspend: Unable to find current SSL session.";
+		return -1;
+	}
+	unique_ptr<FILE, decltype(&fclose)> ticket_f{fopen(d_ticket_file.c_str(), "w"), fclose};
+	if (!ticket_f.get()) {
+		d_err = "client_session::suspend:";
+		d_err += strerror(errno);
+		return -1;
+	}
+
+	PEM_write_SSL_SESSION(ticket_f.get(), session);
+
+	tx_clear(d_peer_fd);
+	tx_add(d_peer_fd, slen(9) + ":C:SPND:0");
+	sequence_t seq = 0;
+	string bk_str = "";
+	auto sv = tx_string(d_peer_fd, seq, bk_str, d_chunk_size);
+
+	for (;;) {
+		ssize_t n = SSL_write(d_ssl, sv.c_str(), sv.size());
+		if (SSL_get_error(d_ssl, n) == SSL_ERROR_NONE)
+			break;
+	}
+
+	SSL_set_quiet_shutdown(d_ssl, 1);
+	d_suspended = 1;
+
+	return 0;
+}
+
+
 int client_session::handle()
 {
+	int ret = 0;
+
+	unique_ptr<FILE, decltype(&fclose)> ticket_f{fopen(d_ticket_file.c_str(), "r"), fclose};
 
 	// If a SNI is given, we use the SNI string as banner for Sign()
-	if (!d_sni.size()) {
+	if (d_sni.empty() && !ticket_f.get()) {
 		char rbanner[1024] = {0};
 
 		FILE *fstream = fdopen(d_peer_fd, "r+");
@@ -473,6 +586,9 @@ int client_session::handle()
 			else
 				fprintf(stderr, "crashc: Major/Minor versions match (%hu/%hu)\n", major, minor);
 		}
+
+	// not necessary to go here when resuming a session, but also not wrong to
+	// have d_sbanner set
 	} else {
 		d_sbanner = d_sni;
 
@@ -480,7 +596,42 @@ int client_session::handle()
 			fprintf(stderr, "crashc: Using SNI instead of banner. No major/minor version check.\n");
 	}
 
-	SSL_set_fd(d_ssl, d_peer_fd);
+	if (d_type == SOCK_DGRAM) {
+		d_bio = BIO_new_dgram(d_peer_fd, BIO_NOCLOSE);
+		BIO_ctrl(d_bio, BIO_CTRL_DGRAM_SET_PEER, 0, d_bio_peer);
+	} else
+		d_bio = BIO_new_socket(d_peer_fd, BIO_NOCLOSE);
+
+	// +1 so we always have d_bio for ourself
+	BIO_up_ref(d_bio);
+
+	// +1 as per manpage
+	BIO_up_ref(d_bio);
+
+#ifdef LIBRESSL_VERSION_NUMBER
+	SSL_set_bio(d_ssl, d_bio, d_bio);
+#else
+	SSL_set0_rbio(d_ssl, d_bio);
+	SSL_set0_wbio(d_ssl, d_bio);
+#endif
+
+	if (ticket_f.get()) {
+		if (config::verbose)
+			fprintf(stderr, "crashc: Using ticket file `%s` instead of authentication.\n", d_ticket_file.c_str());
+		auto session = PEM_read_SSL_SESSION(ticket_f.get(), nullptr, nullptr, nullptr);
+		if (!session) {
+			d_err = "client_session::PEM_read_SSL_SESSION:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+		if (SSL_set_session(d_ssl, session) != 1) {
+			SSL_SESSION_free(session);
+			d_err = "client_session::SSL_set_session:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+		SSL_SESSION_free(session);
+	}
 
 	if (SSL_connect(d_ssl) <= 0) {
 		d_err = "client_session::handle::SSL_connect:";
@@ -493,13 +644,25 @@ int client_session::handle()
 		memset(ssl_desc, 0, sizeof(ssl_desc));
 		SSL_CIPHER_description(SSL_get_current_cipher(d_ssl), ssl_desc, sizeof(ssl_desc) - 1);
 		fprintf(stderr, "crashc: Cipher: %s", ssl_desc);
+		if (SSL_session_reused(d_ssl) == 1)
+			fprintf(stderr, "crashc: Session resumed.");
 	}
 
-	if (check_server_key() != 1)
-		return -1;
+	if (!ticket_f.get()) {
 
-	if (authenticate() < 0)
-		return -1;
+		if (check_server_key() != 1)
+			return -1;
+		if (authenticate() < 0)
+			return -1;
+	}
+
+	ticket_f.release();
+
+	// set signal handler for suspend signal
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = sig_suspend;
+	sigaction(SIGTERM, &sa, nullptr);
 
 	// Now, where passphrase has been typed etc;
 	// setup terminal into raw mode
@@ -642,6 +805,11 @@ int client_session::handle()
 		if (global::window_size_changed)
 			send_window_size();
 
+		if (do_suspend) {
+			ret = suspend("");
+			break;
+		}
+
 		for (i = rl.rlim_cur - 1; i > 0; --i) {
 			if (d_fd2state[i].state != STATE_INVALID && d_fd2state[i].fd != -1) {
 				d_max_fd = i;
@@ -761,7 +929,7 @@ int client_session::handle()
 
 				d_pfds[i].events = POLLIN;
 
-				if (!tx_empty(i)) {
+				if ((revents & POLLOUT) && !tx_empty(i)) {
 
 					// obtains properly padded, sized and sequenced string for the STATE_SSL case
 					// so that the chunks also fit in UDP dgrams
@@ -787,7 +955,10 @@ int client_session::handle()
 						d_err += ERR_error_string(ERR_get_error(), nullptr);
 						flush_fd(1, tx_string_and_clear(1));
 						flush_fd(2, tx_string_and_clear(2));
-						return -1;
+
+						// do not error for DGRAMs, as it could be temporarily missing link
+						if (d_type == SOCK_STREAM)
+							return -1;
 					}
 					// dgram data was already removed by tx_string() before
 					if (n > 0 && d_type == SOCK_STREAM)
@@ -796,12 +967,9 @@ int client_session::handle()
 					d_last_ssl_qlen = tx_size(i);
 					if (ssl_read_wants_write || d_last_ssl_qlen > 0)
 						d_pfds[i].events |= POLLOUT;
-
-					if (!(revents & POLLIN) && !ssl_read_wants_write)
-						continue;
 				}
 
-				if (revents & (POLLIN|POLLOUT)) {
+				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 
 					ssl_read_wants_write = 0;
 
@@ -1126,7 +1294,7 @@ int client_session::handle()
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 

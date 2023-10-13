@@ -53,7 +53,7 @@ void help(const char *p)
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-L [ip]:port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
-	       "\t [-R level] [-N] [-x socks5://[ip]:port] <-l user>\n\n"
+	       "\t [-R level] [-N] [-x socks5://[ip]:port] [-t ticket] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive (default)\n"
@@ -74,6 +74,7 @@ void help(const char *p)
 	       "\t -R -- traffic blinding level (0-6, default 1)\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -S -- SNI to use\n"
+	       "\t -t -- ticket-file to use for suspend/resume\n"
 	       "\t -x -- use this SOCKS5 proxy when connecting\n"
 	       "\t -l -- user to login as (no default!)\n\n",
 	       p, config::port.c_str(), config::server_keys.c_str());
@@ -98,8 +99,11 @@ int main(int argc, char **argv)
 	// in client mode we do not bind to a specific port by default
 	config::lport = "0";
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:L:X:Y:l:i:c:R:T:U:5:4:S:x:DN")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:L:X:Y:l:i:c:R:T:U:5:4:S:x:DNt:")) != -1) {
 		switch (c) {
+		case 't':
+			config::ticket = optarg;
+			break;
 		case 'N':
 			config::socks5_dns = 1;
 			break;
@@ -248,7 +252,7 @@ int main(int argc, char **argv)
 		else
 			fprintf(stderr, "crashc: listen for back-connect on [%s]:%s ...\n\n", config::laddr.c_str(), config::lport.c_str());
 	}
-	client_session csess(config::transport, config::sni);
+	client_session csess(config::ticket, config::transport, config::sni);
 	if (csess.setup() < 0) {
 		fprintf(stderr, "crashc: %s\n", csess.why());
 		return 1;
@@ -259,8 +263,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (config::verbose)
+	if (config::verbose) {
+		if (csess.suspended())
+			fprintf(stderr, "\ncrashc: suspended.\n");
 		fprintf(stderr, "crashc: closing connection.\n");
+	}
 
 	if (!global::input_received)
 		fprintf(stderr, "crashc: No input received. Error. Auth failure?\n");

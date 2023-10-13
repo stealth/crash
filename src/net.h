@@ -65,7 +65,7 @@ public:
 
 	int connect(const std::string &, const std::string &);
 
-	int blisten(const std::string &, const std::string &, bool do_listen = 1);
+	int blisten(const std::string &, const std::string &, bool do_listen = 1, bool do_reuse = 1);
 
 	bool is_good() { return d_sock_fd >= 0; };
 

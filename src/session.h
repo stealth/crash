@@ -46,6 +46,7 @@
 #include "net.h"
 #include "misc.h"
 #include "iobox.h"
+#include "missing.h"
 
 extern "C" {
 #include <openssl/opensslv.h>
@@ -63,13 +64,16 @@ class session {
 protected:
 
 	std::string d_err{""};
-	std::string d_transport{"tls1"}, d_sni{""};
+	std::string d_transport{"tls1"}, d_sni{""}, d_ticket_file{""};
 
 	// keep sent packets in DGRAM case in a tx map for requested resends
 	// and keep rx packets that arrived out of order for later processing
 	std::map<sequence_t, std::string> d_tx_map, d_rx_map;
 
 	SSL *d_ssl{nullptr};
+
+	BIO *d_bio{nullptr};
+	BIO_ADDR *d_bio_peer{nullptr};
 
 	EVP_PKEY *d_pubkey{nullptr}, *d_privkey{nullptr};
 
@@ -88,6 +92,17 @@ protected:
 
 		// last seq# that we acked to peer, last tx seq# that we injected a SQ pkt
 		sequence_t last_rx_acked{0}, last_tx_sq_added{0};
+
+		void reset()
+		{
+			tx_sequence = 1;
+			rx_sequence = 1;
+			last_rx_seen = 0;
+			packet_loss = 0;
+			last_rx_acked = 0;
+			last_tx_sq_added = 0;
+		}
+
 	} d_flow;
 
 	struct {
@@ -102,7 +117,11 @@ protected:
 
 	unsigned int d_chunk_size{TCP_CHUNK_SIZE};
 
-	uint16_t d_major{3}, d_minor{3};
+	uint16_t d_major{3}, d_minor{4};
+
+	// whether suspend signal was received, which needs different
+	// connection teardown in destructor
+	bool d_suspended{0};
 
 	// my own stringview for optimization of tx_string() in C++11 that doesn't have it yet
 	class strview {
@@ -146,6 +165,8 @@ protected:
 
 	bool tx_must_add_sq(int);
 
+	virtual int suspend(const std::string &) = 0;
+
 	virtual int authenticate() = 0;
 
 	virtual int handle_input(int) = 0;
@@ -162,6 +183,8 @@ public:
 	{
 		return d_err.c_str();
 	}
+
+	bool suspended() { return d_suspended; }
 };
 
 
@@ -189,16 +212,14 @@ protected:
 
 	int check_server_key();
 
+	virtual int suspend(const std::string &) override;
+
 	virtual int authenticate() override;
 
 	virtual int handle_input(int) override;
 
 public:
-
-	client_session(const std::string &t, const std::string &sni)
-	 : session(t, sni)
-	{
-	}
+	client_session(const std::string &, const std::string &, const std::string &);
 
 	~client_session();
 
@@ -211,16 +232,15 @@ public:
 
 class server_session : public session {
 
-	int d_stdin_closed{0};
+	SSL_CTX *d_ssl_ctx0{nullptr};	// not owning
 
-	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""};
-
-	std::string d_banner{"1000 crashd-3.0003 OK\r\n"};	// keep in sync with d_major and d_minor
+	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""}, d_peer_ip{""};
+	std::string d_banner{"1000 crashd-3.0004 OK\r\n"};	// keep in sync with d_major and d_minor
 
 	iobox d_iob;
 
+	int d_stdin_closed{0};
 	uid_t d_final_uid{0xffff};
-	char d_peer_ip[64]{0};
 
 protected:
 
@@ -230,13 +250,15 @@ protected:
 	BIO_ADDR *d_dlisten_param{nullptr};
 #endif
 
+	virtual int suspend(const std::string &) override;
+
 	virtual int authenticate() override;
 
 	virtual int handle_input(int) override;
 
 public:
 
-	server_session(int, const std::string &, const std::string &);
+	server_session(int, const std::string &, const std::string &, const std::string &);
 
 	~server_session();
 

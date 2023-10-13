@@ -9,11 +9,11 @@
 namespace config
 {
 	extern bool verbose, silent, v6, uid_change, wrap,
-	            always_login, extract_blob, no_hk_check, no_net, socks5_dns;
+	            always_login, extract_blob, no_hk_check, no_net, socks5_dns, allow_roam;
 
 	extern uint32_t traffic_flags;
 
-	extern std::string keyfile, certfile, host, port, laddr, lport, local_proxy_ip, sni, transport;
+	extern std::string keyfile, certfile, host, port, laddr, lport, local_proxy_ip, sni, transport, ticket;
 	extern std::string server_keys, user_keys, user, cmd;
 
 	extern std::string tfile, tmsg, good_ip_file;
