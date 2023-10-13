@@ -117,7 +117,7 @@ stealth@linux ~> ./crashd -h
 crypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash
 
 
-Usage:	./src/crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
+Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
 	 [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]
 	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]
 	 [-x socks5://[ip]:port] [-w]
@@ -155,7 +155,7 @@ a host-argument `-H` is given, it uses active connect to this host
 and the belonging port `-p`. It also accepts `-L` which specifies the local address and port it has
 to bind to, either before doing active connect (`-H`) or passively (no `-H` given).
 This way - from TCP point view - client and server role may be reversed, while still having
-`crashd` as the shell server.
+*crashd* as the shell server.
 If `-w` is used it forks itself as **[kthreadd]** and tries to wrap around its
 `pid` to be somewhere around the system daemons. As `-w` is overwriting main()'s `argv` array,
 it must appear last in the option list, otherwise option processing will not work
@@ -355,14 +355,14 @@ SOCKS4 and SOCKS5 support
 *crash* also supports forwarding of TCP connections via *SOCKS4* (`-4 port`) and *SOCKS5*
 (`-5 port`). This sets up *port* as SOCKS port for TCP connections, so for instance you
 can browse remote networks via *crashc* sessions without the need to open any other
-connection during a pentest. If you pass `-N` to `crashc`, it enables DNS name resolution
+connection during a pentest. If you pass `-N` to *crashc*, it enables DNS name resolution
 on the remote side, so you can also use chrome with it. But be warned: There is a privacy
 problem with browsers that try to resolve a sequence of DNS names upon startup that
 is not under your control. Also, if your remote side has a broken DNS setup, your typing
 shell may block for several seconds if DNS reply packets are missing. There are no good
 async resolver functions which are embeddable and portable so I had to rely on
 `getaddrinfo()` in the single thread at the price of possible blockings for several seconds
-if DNS problems exist. Thats why name resolving has to be enabled explicitly. `crashd`
+if DNS problems exist. Thats why name resolving has to be enabled explicitly. *crashd*
 tries to minimize this potential problem with DNS lookup caches though, so in most
 situation it should just work painlessly.
 If you pass `-X IP-address` (must come before any other proxy argument), you can bind your local proxy
@@ -474,10 +474,10 @@ detect and classify SSH traffic by behavioral analysis.
 Hiding by SNI
 -------------
 
-By default, the `crashd` will show a banner upon connect to tell the peer major and minor version
+By default, the *crashd* will show a banner upon connect to tell the peer major and minor version
 numbers. Censorship countries might block addresses which show banners they dislike. To combat this,
 *crash* allows for a TLS-only mode that is indistinguishable from a HTTPS session. Just start
-`crashd` with `-S` and give a semi-secret name (Server Name Indicator, SNI). Only clients that also
+*crashd* with `-S` and give a semi-secret name (Server Name Indicator, SNI). Only clients that also
 use the correct `-S` parameter will reach the gate for authentication at all. Other TLS sessions
 will just be rejected. *Note that the SNI travels the network in plain-text and that `-S` is not meant
 for authentication.* The only reason for SNI hiding is to hide the *crash* banner from probing/crawling.
