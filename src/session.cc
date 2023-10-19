@@ -68,7 +68,7 @@ session::session(const string &t, const string &sni)
 session::~session()
 {
 	if (d_bio_peer)
-		BIO_ADDR_free(d_bio_peer);
+		crash::BIO_ADDR_free(d_bio_peer);
 
 	// OK to free d_bio, as we up_refed +1 for ourself just
 	// after creating and BIO_free_all() as called on SSL_free()

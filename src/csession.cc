@@ -72,6 +72,10 @@ extern "C" {
 namespace crash {
 
 
+// required, since some libcs declare fclose() with attributes that can't be used with unique_ptr<>
+typedef int (*fclose_t)(FILE *);
+
+
 #ifdef USE_CCIPHERS
 string ciphers = USE_CCIPHERS;
 #else
@@ -280,7 +284,7 @@ int client_session::setup()
 				wport = reinterpret_cast<const sockaddr_in6 *>(tai->ai_addr)->sin6_port;
 				wlen = sizeof(in6_addr);
 			}
-			BIO_ADDR_rawmake(d_bio_peer, d_family, where, wlen, wport);
+			crash::BIO_ADDR_rawmake(d_bio_peer, d_family, where, wlen, wport);
 			freeaddrinfo(tai);
 		}
 	} else {
@@ -390,7 +394,7 @@ int client_session::check_server_key()
 
 	d_err = "client_session::check_server_key: FAILED! Unknown pubkey!";
 
-	int r = EVP_PKEY_cmp(d_pubkey, pkey_file);
+	int r = crash::EVP_PKEY_cmp(d_pubkey, pkey_file);
 
 	// we need d_pubkey later for authentication
 	EVP_PKEY_free(pkey_file);
@@ -518,7 +522,7 @@ int client_session::suspend(const string &)
 		d_err = "client_session::suspend: Unable to find current SSL session.";
 		return -1;
 	}
-	unique_ptr<FILE, decltype(&fclose)> ticket_f{fopen(d_ticket_file.c_str(), "w"), fclose};
+	unique_ptr<FILE, fclose_t> ticket_f{fopen(d_ticket_file.c_str(), "w"), fclose};
 	if (!ticket_f.get()) {
 		d_err = "client_session::suspend:";
 		d_err += strerror(errno);
@@ -550,7 +554,7 @@ int client_session::handle()
 {
 	int ret = 0;
 
-	unique_ptr<FILE, decltype(&fclose)> ticket_f{fopen(d_ticket_file.c_str(), "r"), fclose};
+	unique_ptr<FILE, fclose_t> ticket_f{fopen(d_ticket_file.c_str(), "r"), fclose};
 
 	// If a SNI is given, we use the SNI string as banner for Sign()
 	if (d_sni.empty() && !ticket_f.get()) {

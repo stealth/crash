@@ -139,7 +139,7 @@ server_session::server_session(int fd, const string &transport, const string &sn
 		where = &(reinterpret_cast<const sockaddr_in6 *>(from.c_str()))->sin6_addr;
 		wlen = sizeof(in6_addr);
 	}
-	BIO_ADDR_rawmake(d_dlisten_param, d_family, where, wlen, fport);
+	crash::BIO_ADDR_rawmake(d_dlisten_param, d_family, where, wlen, fport);
 #endif
 }
 
@@ -147,7 +147,7 @@ server_session::server_session(int fd, const string &transport, const string &sn
 server_session::~server_session()
 {
 #if !defined LIBRESSL_VERSION_NUMBER && !defined BORINGSSL_API_VERSION
-	BIO_ADDR_free(d_dlisten_param);
+	crash::BIO_ADDR_free(d_dlisten_param);
 #endif
 
 }

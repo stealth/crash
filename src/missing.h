@@ -4,16 +4,16 @@
 extern "C" {
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
 }
+
+namespace crash {
 
 #if OPENSSL_VERSION_NUMBER > 0x10100000L && !(defined LIBRESSL_VERSION_NUMBER) && !(defined BORINGSSL_API_VERSION)
 #define EVP_MD_CTX_delete EVP_MD_CTX_free
 #else
 #define EVP_MD_CTX_delete EVP_MD_CTX_destroy
-#endif
-
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-#define EVP_PKEY_cmp EVP_PKEY_eq
 #endif
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L || LIBRESSL_VERSION_NUMBER >= 0x30000000L
@@ -34,14 +34,17 @@ union BIO_ADDR {
 	struct sockaddr_in6 sa_in6;
 };
 
+#endif
+
 int BIO_ADDR_rawmake(BIO_ADDR *, int, const void *, size_t, unsigned short);
 
 BIO_ADDR *BIO_ADDR_new();
 
 void BIO_ADDR_free(BIO_ADDR *);
 
-#endif
+int EVP_PKEY_cmp(const EVP_PKEY *, const EVP_PKEY *);
 
+}
 
 #endif
 

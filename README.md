@@ -427,6 +427,8 @@ roaming session already exists, the next one needs to "connect" to port `2223`. 
 session at port `2222` is finished (not suspended, but really finished), port `2222`
 will become available again to the next client.
 
+Suspend/Resume does not work yet with *LibreSSL* builds.
+
 Mitigating traffic analysis
 ---------------------------
 
