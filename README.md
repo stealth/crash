@@ -38,6 +38,12 @@ An SSH alternative featuring:
 * transparent roaming support with DTLS client sessions
 * suspend/resume support with DTLS client sessions
 
+
+If you came here for censorship circumvention - once everything is done and working - go to
+[proxywars contrib](https://github.com/stealth/crash/blob/master/contrib/proxywars.md)
+to learn about how to create WA/TG messenger proxy setups in censorship environments.
+
+
 Build
 -----
 
@@ -67,7 +73,7 @@ $ make -C src keys
 ```
 
 or see further instructions in this document. If you want to use _ephemeral keying_
-(aka [PFS](http://en.wikipedia.org/wiki/Perfect_Forward_Secrecy)), invoke
+(aka [PFS](https://en.wikipedia.org/wiki/Perfect_Forward_Secrecy)), invoke
 
 ```
 $ cd src; ./newdh
@@ -371,7 +377,7 @@ to an address different from `127.0.0.1`, so you can share the proxy in your loc
 There is also a client side SOCKS5 support available when using *crashc* with `-x`.
 
 
-proxying based on SNI
+Proxying based on SNI
 ---------------------
 
 In some circumstances you might want to change the endpoint of the proxy session based
@@ -427,7 +433,8 @@ roaming session already exists, the next one needs to "connect" to port `2223`. 
 session at port `2222` is finished (not suspended, but really finished), port `2222`
 will become available again to the next client.
 
-Suspend/Resume does not work yet with *LibreSSL* builds.
+Suspend/Resume does not work yet with *LibreSSL* builds, but roaming does.
+
 
 Mitigating traffic analysis
 ---------------------------
@@ -491,6 +498,10 @@ In order for probing to not reveal that you are running *crash* by checking the 
 details, you should use reasonable values for *Country Name*, *City* etc. when asked for it during
 the `make keys` process. For instance it would make no sense to setup a pro-regime web-site
 to hide behind and enter anti-regime values for the X509 specific naming.
+
+Inside the `contrib` folder you will find a nginx config file that you can integrate into
+your setup along with comments how you would create a connect from outside to your nginx server
+in order to have a *crash* session based on a SNI that you chose.
 
 
 File up/download
