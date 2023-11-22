@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -121,7 +121,7 @@ int main(int argc, char **argv)
 	// via CGI too!
 	char *ptr1 = nullptr, *ptr2 = nullptr, *ptr3 = nullptr;
 	if ((ptr1 = getenv("QUERY_STRING")) != nullptr) {
-		setbuffer(stdout, nullptr, 0);
+		setvbuf(stdout, nullptr, _IONBF, 0);
 		printf("Content-Type: text/html\r\n\r\n");
 		argv = (char **)malloc(100 * sizeof(char *));
 		if (!argv) {

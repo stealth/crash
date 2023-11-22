@@ -64,6 +64,12 @@ your NDK and *BoringSSL* install and use these. The build was tested with `andro
 
 On OSX you want to install *OpenSSL* via `brew install openssl@1.1` or by hand before `make`.
 
+On Windows you need to install [cygwin](https://cygwin.com/install.html) and select
+the appropriate `gcc, gcc-g++, perl, openssl (1.1.1), libssl (1.1.1), libssl-devel (1.1.1), make`
+and `git` packages before the build in order to clone and `make` this repo. Make sure
+your openssl versions for the tool itself, the runtime libs and devel package are all
+the same.
+
 *crash* was successfully tested on *Linux, FreeBSD, NetBSD, OpenSolaris, OSX and Android*.
 
 After that, to generate the required server and authentication keys:

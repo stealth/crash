@@ -8,6 +8,8 @@ LIBS=
 CXXFLAGS=
 DEFS=-DTITLE="\"[kthreadd]\""
 
+POSIX=-D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE=600
+
 # comment in if you want to have server and client support TLS 1.2 in order
 # to use aged systems that have no TLS 1.3 libcrypto support, which is otherwise
 # the minimum TLS version
@@ -25,14 +27,23 @@ DEFS+=-DNO_DTLS_LISTEN
 ifeq ($(shell uname), Linux)
 	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib -Wl,--rpath=$(SSL)/lib64
 	DEFS+=-DHAVE_UNIX98
+	DEFS+=$(POSIX)
 else ifeq ($(shell uname), Solaris)
 	LIBS+=-lssl -lcrypto -lsocket -lnsl
 else ifeq ($(shell uname), Darwin)
 	SSL=/usr/local/opt/openssl\@1.1
 	LIBS+=-lssl -lcrypto
 	DEFS+=-DHAVE_UNIX98
+else ifeq ($(shell uname), OpenBSD)
+	LIBS+=-lssl -lcrypto -lutil
+else ifeq ($(shell uname), NetBSD)
+	LIBS+=-lssl -lcrypto -lutil
+else ifeq ($(shell uname), FreeBSD)
+	LIBS+=-lssl -lcrypto -lutil
+# Cygwin
 else
 	LIBS+=-lssl -lcrypto -lutil
+	DEFS+=$(POSIX)
 endif
 
 

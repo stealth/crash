@@ -30,6 +30,11 @@
  * SUCH DAMAGE.
  */
 
+// for initgroups() etc
+#ifdef __CYGWIN__
+#define _BSD_SOURCE
+#endif
+
 #include <cstdio>
 #include <string>
 #include <cstring>

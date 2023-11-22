@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -198,7 +198,7 @@ void read_until(const char *path, const char *msg)
 	FILE *f = fopen(path, "r");
 	if (!f)
 		return;
-	setbuffer(f, nullptr, 0);
+	setvbuf(f, nullptr, _IONBF, 0);
 	fseek(f, 0, SEEK_END);
 	long off = ftell(f);
 
@@ -347,7 +347,7 @@ bool is_nologin(const string &shell)
 
 void setproctitle(const string &proc)
 {
-#if !defined __linux__ && !defined __APPLE__
+#if !defined __linux__ && !defined __APPLE__ && !defined __CYGWIN__
 	::setproctitle("%s", proc.c_str());
 #endif
 #if defined __linux__

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2023 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -112,6 +112,10 @@ int Socket::blisten(const string &laddr, const string &lport, bool do_listen, bo
 	if (do_reuse) {
 		int one = 1;
 		setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#ifdef SO_REUSEPORT
+		one = 1;
+		setsockopt(d_sock_fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+#endif
 	}
 
 	struct addrinfo hint = {0}, *tai = nullptr;
@@ -294,8 +298,10 @@ static int listen(int type, const string &ip, const string &port)
 	fcntl(sock_fd, F_SETFL, flags|O_NONBLOCK);
 
 	int one = 1;
+#ifdef SO_REUSEPORT
 	setsockopt(sock_fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
 	one = 1;
+#endif
 	setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
 	if (::bind(sock_fd, ai->ai_addr, ai->ai_addrlen) < 0)
