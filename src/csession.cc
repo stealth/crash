@@ -567,7 +567,7 @@ int client_session::handle()
 			return -1;
 		}
 
-		setbuffer(fstream, nullptr, 0);
+		setvbuf(fstream, nullptr, _IONBF, 0);
 
 		if (!fgets(rbanner, sizeof(rbanner) - 1, fstream)) {
 			d_err = "client_session::handle:: Cannot read remote banner string.";
