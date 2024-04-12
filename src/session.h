@@ -117,7 +117,7 @@ protected:
 
 	unsigned int d_chunk_size{TCP_CHUNK_SIZE};
 
-	uint16_t d_major{3}, d_minor{4};
+	uint16_t d_major{3}, d_minor{5};	// keep in-sync with server_session::d_banner
 
 	// whether suspend signal was received, which needs different
 	// connection teardown in destructor
@@ -192,7 +192,7 @@ class client_session : public session {
 
 	udp_node2id d_udp_node2id;
 
-	std::string d_sbanner{""};
+	std::string d_sbanner{""}, d_disguise_prefix{""};
 
 	struct termios d_tattr, d_old_tattr;
 
@@ -219,7 +219,7 @@ protected:
 	virtual int handle_input(int) override;
 
 public:
-	client_session(const std::string &, const std::string &, const std::string &);
+	client_session(const std::string &, const std::string &, const std::string &, const std::string &);
 
 	~client_session();
 
@@ -235,7 +235,7 @@ class server_session : public session {
 	SSL_CTX *d_ssl_ctx0{nullptr};	// not owning
 
 	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""}, d_peer_ip{""};
-	std::string d_banner{"1000 crashd-3.0004 OK\r\n"};	// keep in sync with d_major and d_minor
+	std::string d_banner{"1000 crashd-3.0005 OK\r\n"};	// keep in sync with d_major and d_minor
 
 	iobox d_iob;
 

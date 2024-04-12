@@ -91,13 +91,14 @@ void sig_suspend(int x)
 }
 
 
-client_session::client_session(const string &ticket, const string &transport, const string &sni)
+client_session::client_session(const string &ticket, const string &transport, const string &sni, const string &prefix)
 	 : session(transport, sni)
 {
 	if (config::v6)
 		d_family = AF_INET6;
 
 	d_ticket_file = ticket;
+	d_disguise_prefix = prefix;
 }
 
 
@@ -404,6 +405,23 @@ int client_session::check_server_key()
 
 int client_session::authenticate()
 {
+	// At this point we have blocking SSL I/O
+
+	if (!d_disguise_prefix.empty()) {
+		rewrite1: ssize_t n = SSL_write(d_ssl, d_disguise_prefix.c_str(), d_disguise_prefix.size());
+		switch (SSL_get_error(d_ssl, n)) {
+		case SSL_ERROR_NONE:
+			break;
+		case SSL_ERROR_WANT_WRITE:
+		case SSL_ERROR_WANT_READ:
+			goto rewrite1;
+		default:
+			d_err = "client_session::authenticate:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+	}
+
 	char rbuf[MSG_BSIZE + 1] = {0};
 
 	reread: ssize_t r = SSL_read(d_ssl, rbuf, sizeof(rbuf));
@@ -498,13 +516,13 @@ int client_session::authenticate()
 		return -1;
 	memcpy(sbuf + strlen(sbuf), resp, resplen);
 
-	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, MSG_BSIZE);
+	rewrite2: ssize_t n = SSL_write(d_ssl, sbuf, MSG_BSIZE);
 	switch (SSL_get_error(d_ssl, n)) {
 		case SSL_ERROR_NONE:
 			break;
 		case SSL_ERROR_WANT_WRITE:
 		case SSL_ERROR_WANT_READ:
-			goto rewrite;
+			goto rewrite2;
 		default:
 			d_err = "client_session::authenticate:";
 			d_err += ERR_error_string(ERR_get_error(), nullptr);

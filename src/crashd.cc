@@ -58,7 +58,7 @@ void help(const char *p)
 	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]\n"
 	       "\t [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]\n"
 	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]\n"
-	       "\t [-x socks5://[ip]:port] [-w]\n\n"
+	       "\t [-x socks5://[ip]:port] [-G method:prefix:action] [-w]\n\n"
 	       "\t -a -- always login if authenticated, despite false/nologin shells\n"
 	       "\t -U -- run as user (e.g. turn off setuid() calls) if invoked as such\n"
 	       "\t -e -- extract key and certfile from the binary itself (no -k/-c needed)\n"
@@ -81,6 +81,7 @@ void help(const char *p)
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -x -- use this SOCKS5 proxy when using active connect\n"
 	       "\t -R -- allow clients to roam sessions\n"
+	       "\t -G -- Traffic Disguise Filters, check docu\n"
 	       "\t -S -- SNI to hide behind\n\n",
 	       p, TITLE, config::port.c_str(), config::laddr.c_str(), config::lport.c_str(), config::user_keys.c_str(), config::keyfile.c_str(),
 	       config::certfile.c_str());
@@ -162,10 +163,18 @@ int main(int argc, char **argv)
 
 	printf("\ncrypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
-	char ip[128] = {0}, lport[16] = {0};
+	char ip[128] = {0}, lport[16] = {0}, prefix[128] = {0}, action[256] = {0};
 
-	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:DUweaS:NR")) != -1) {
+	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:DUweaS:NRG:")) != -1) {
 		switch (c) {
+		case 'G':
+			// The only method for now is "redirect1"
+			if (sscanf(optarg, "redirect1:%127[^:]:%255c", prefix, action) == 2) {
+				config::disguise_method = "redirect1";
+				config::disguise_secret = prefix;
+				config::disguise_action = action;
+			}
+			break;
 		case 'D':
 			config::transport = "dtls1";
 			break;

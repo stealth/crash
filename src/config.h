@@ -18,6 +18,8 @@ namespace config
 
 	extern std::string tfile, tmsg, good_ip_file;
 
+	extern std::string disguise_method, disguise_secret, disguise_action;
+
 	extern std::string socks5_connect_proxy, socks5_connect_proxy_port;
 
 	extern std::map<std::string, std::string> tcp_listens, udp_listens;

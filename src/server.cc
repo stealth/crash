@@ -233,7 +233,7 @@ int Server::setup()
 int Server::loop()
 {
 	pid_t pid = 0;
-	int peer_fd = -1;
+	int peer_fd = -1, r = 0;
 	struct sockaddr *from = nullptr;
 	struct sockaddr_in from4;
 	struct sockaddr_in6 from6;
@@ -402,14 +402,19 @@ int Server::loop()
 			return -1;
 		}
 		server_session *s = new (nothrow) server_session(d_sock_fd, d_transport, d_sni, "");
-		if (s)
-			s->handle(d_ssl_ctx);
+		if (s) {
+			if ((r = s->handle(d_ssl_ctx)) < 0) {
+				d_err = "Server::loop::";
+				d_err += s->why();
+			}
+		}
 		delete s;
 	} else {
 		d_err = "Server::loop: Not possible to use active connect as server in UDP mode.";
-		return -1;
+		r = -1;
 	}
-	return 0;
+
+	return r;
 }
 
 }

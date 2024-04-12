@@ -41,6 +41,8 @@ namespace config
 
 	std::string good_ip_file = "";
 
+	std::string disguise_method = "", disguise_secret = "", disguise_action = "";
+
 	std::string socks5_connect_proxy = "", socks5_connect_proxy_port = "";
 
 	std::map<std::string, std::string> tcp_listens, udp_listens;

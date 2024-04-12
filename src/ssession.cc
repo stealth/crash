@@ -67,6 +67,7 @@ extern "C" {
 #include <iostream>
 #include "config.h"
 #include "global.h"
+#include "disguise.h"
 #include "session.h"
 #include "misc.h"
 #include "pty.h"
@@ -473,6 +474,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 	if (config::allow_roam && d_type == SOCK_DGRAM)
 		BIO_ctrl(d_bio, BIO_CTRL_DGRAM_GET_PEER, 0, d_bio_peer);
 
+	if (disguise_filter(d_ssl) != 1) {
+		d_err = "server_session: Disguise filter triggered.";
+		return -1;
+	}
 
 	// Get our own X509 for authentication input. This has moved below
 	// SSL_accept() since OSX ships with buggy OpenSSL that segfaults

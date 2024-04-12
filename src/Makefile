@@ -96,8 +96,8 @@ crashc: net.o misc.o crashc.o config.o session.o csession.o global.o missing.o
 	$(LD) net.o misc.o crashc.o config.o pty.o global.o pty98.o session.o csession.o missing.o $(LIBS) $(LDFLAGS) -o crashc
 	$(STRIP) crashc
 
-crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o
-	$(LD) server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o $(LIBS) $(LDFLAGS) -o crashd
+crashd: server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o disguise.o
+	$(LD) server.o session.o ssession.o net.o misc.o crashd.o config.o pty.o pty98.o global.o log.o dh.o iobox.o missing.o disguise.o $(LIBS) $(LDFLAGS) -o crashd
 	$(STRIP) crashd
 
 missing.o: missing.cc
@@ -105,6 +105,9 @@ missing.o: missing.cc
 
 iobox.o: iobox.cc
 	$(CXX) $(CXXFLAGS) -c iobox.cc
+
+disguise.o: disguise.cc
+	$(CXX) $(CXXFLAGS) -c disguise.cc
 
 server.o: server.cc
 	$(CXX) $(CXXFLAGS) -c server.cc
