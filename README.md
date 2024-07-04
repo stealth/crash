@@ -33,7 +33,7 @@ An SSH alternative featuring:
 * messenger proxy support
 * proxying based on SNI
 * SNI hiding mode
-* Disguise filters to mask as different kind of software to global observers
+* Disguise Filters to mask as different kind of software to global observers
 * can use UDP transport mode with DTLS and added reliability and flow-control
   layer
 * transparent roaming support with DTLS client sessions
@@ -525,7 +525,7 @@ This can't be known by an observer as its hidden inside the TLS stream (unlike t
 the secret is not correct, *crashd* disguises as another - innocent looking - software.
 
 Currently, there is only one Disguise Filter, `redirect1`, which masks as a web server
-sending a redirect of your choice. Disguise Filters always also require `-S':
+sending a redirect of your choice. Disguise Filters always also require `-S`:
 
 
 ```
