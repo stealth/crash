@@ -81,7 +81,7 @@ void logger::login(const string &dev, const string &user, const string &host)
 }
 
 
-void logger::logout(pid_t pid)
+void logger::logout(pid_t pid, const struct timeval &tv)
 {
 }
 
@@ -117,7 +117,8 @@ void logger::login(const string &dev, const string &user, const string &host)
 
 	timeval tv;
 	gettimeofday(&tv, nullptr);
-	memcpy(&utx.ut_tv, &tv, sizeof(tv));
+	utx.ut_tv.tv_sec = tv.tv_sec;
+	utx.ut_tv.tv_usec = tv.tv_usec;
 
 	setutxent();
 	pututxline(&utx);
@@ -125,30 +126,38 @@ void logger::login(const string &dev, const string &user, const string &host)
 }
 
 
-void logger::logout(pid_t pid)
+void logger::logout(pid_t pid, const struct timeval &tv)
 {
 	if (config::silent)
 		return;
 
-	timeval tv;
-	setutxent();
-	struct utmpx *t = nullptr;
-	for (;;) {
-		t = getutxent();
+	struct utmpx utx;
+	memset(&utx, 0, sizeof(utx));
 
-		if (!t)
+	utx.ut_pid = pid;
+	utx.ut_type = DEAD_PROCESS;
+
+#ifdef __CYGWIN__
+	snprintf(utx.ut_id, sizeof(utx.ut_id), "%02x", utx.ut_pid);
+#else
+	snprintf(utx.ut_id, sizeof(utx.ut_id), "%03x", utx.ut_pid);
+#endif
+
+	utx.ut_tv.tv_sec = tv.tv_sec;
+	utx.ut_tv.tv_usec = tv.tv_usec;
+
+	setutxent();
+
+	struct utmpx *ent = nullptr;
+	for (;;) {
+		if (!(ent = getutxid(&utx)))
 			break;
-		if (t->ut_pid != pid || t->ut_type != USER_PROCESS)
-			continue;
-		t->ut_type = DEAD_PROCESS;
-		gettimeofday(&tv, nullptr);
-		memcpy(&t->ut_tv, &tv, sizeof(tv));
-		memset(t->ut_user, 0, sizeof(t->ut_user));
-		pututxline(t);
-		break;
+		if (ent->ut_pid == pid && ent->ut_type == USER_PROCESS) {
+			pututxline(&utx);
+			break;
+		}
 	}
 	endutxent();
-
 }
 
 #endif

@@ -33,6 +33,7 @@ An SSH alternative featuring:
 * messenger proxy support
 * proxying based on SNI
 * SNI hiding mode
+* Disguise filters to mask as different kind of software to global observers
 * can use UDP transport mode with DTLS and added reliability and flow-control
   layer
 * transparent roaming support with DTLS client sessions
@@ -508,6 +509,45 @@ to hide behind and enter anti-regime values for the X509 specific naming.
 Inside the `contrib` folder you will find a nginx config file that you can integrate into
 your setup along with comments how you would create a connect from outside to your nginx server
 in order to have a *crash* session based on a SNI that you chose.
+
+
+Disguise Filters
+----------------
+
+Taking the feature of SNI hiding one step further. Some countries use network data gathered at
+their border routers to scan destination machines and check whether the content or software there
+could pose a threat to their leaders. It is therefore not good to always tell anyone openly
+that a *crashd* is running on a certain port, even if the peer shows up with the right SNI,
+as the SNI could have been sniffed by a global observer. Entering *Disguise Filters*.
+
+Upon connect, you have to show up with a correct (pre-)secret in order to start a *crash* session.
+This can't be known by an observer as its hidden inside the TLS stream (unlike the SNI). If
+the secret is not correct, *crashd* disguises as another - innocent looking - software.
+
+Currently, there is only one Disguise Filter, `redirect1`, which masks as a web server
+sending a redirect of your choice. Disguise Filters always also require `-S':
+
+
+```
+$ ./crashd -L [0.0.0.0]:4433 -c serverkey.pub -k serverkey.priv \
+   -G redirect1:mydirtysecret:https://www.ccc.de -S localhost
+```
+
+So only those who know can start a shell session:
+
+```
+$ ./crashc -H 127.0.0.1 -p 4433 -l stealth -i authkey.priv -S localhost -G mydirtysecret
+```
+
+All others, e.g. `curl https://localhost:4433 -k -v -L` will be redirected to `https://www.ccc.de`.
+
+(where `localhost` was just chosen for testing to make curl have the right SNI)
+When a Disguise Filter is triggered, you will see it in the logs. This also allows admins to
+have shell servers reachable from outside which just map to the legit web server when not
+prompted with the correct (pre-) secret.
+For sure; for a disguise to work against censors with a large dick, your story has to be
+perfect, i.e. the CNs etc. of the certificate have to look legit, even better signed by
+a legit CA and the redirect has to look reasonable.
 
 
 File up/download

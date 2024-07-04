@@ -35,7 +35,9 @@
 #include <sys/types.h>
 #include <time.h>
 #include <sys/time.h>
+#include <utility>
 #include <string>
+#include <atomic>
 #include <map>
 #include "net.h"
 #include "log.h"
@@ -62,11 +64,23 @@ class Server {
 
 	std::map<std::string, time_t> d_connects;
 	static unsigned short d_min_time_between_reconnect;
+
+	static std::atomic<int> sigchld_mtx;
+	static int sigchld_idx;
+	enum { MAX_CHLDS = 32 };
+	static std::pair<pid_t, struct timeval> sigchld_pids[MAX_CHLDS];
+
 public:
 
 	Server(const std::string &, const std::string &);
 
 	~Server();
+
+	// These need to be in Server{} because its running privileged, so
+	// the release cann ::logout() the PIDs from the utmx files
+	static void add_chld(pid_t);
+
+	static void release_chlds();
 
 	const char *why() { return d_err.c_str(); };
 

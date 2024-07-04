@@ -35,12 +35,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <atomic>
+#include <utility>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/time.h>
 #include "session.h"
 #include "server.h"
@@ -65,7 +68,17 @@ extern "C" {
 
 namespace crash {
 
+// class static definitions
 unsigned short Server::d_min_time_between_reconnect = 1;
+
+// We can't use std::mutex b/c try_lock() in the same thread is undefined and
+// can't use std::recursive_mutex b/c try_lock() would succeed, so we have to use our own
+// kind of locking from within signal handlers and we will use cmpxchg on atomics for that.
+atomic<int> Server::sigchld_mtx{0};
+
+// We can't use maps or vectors, as they'd use the heap and we will work inside sig handler
+int Server::sigchld_idx{-1};
+pair<pid_t, struct timeval> Server::sigchld_pids[Server::MAX_CHLDS];
 
 
 #ifdef USE_SCIPHERS
@@ -122,6 +135,41 @@ Server::~Server()
 	if (d_ssl_ctx)
 		SSL_CTX_free(d_ssl_ctx);
 	delete d_sock;
+}
+
+
+// called from signal handler
+void Server::add_chld(pid_t p)
+{
+	int unlocked = 0;
+
+	struct timeval tv;
+	tv.tv_sec = time(nullptr);
+	tv.tv_usec = 0;
+
+	// Can't acquire lock? Just return
+	if (!sigchld_mtx.compare_exchange_strong(unlocked, 1))
+		return;
+
+	if (sigchld_idx < (MAX_CHLDS - 1))
+		sigchld_pids[++sigchld_idx] = {p, tv};
+
+	sigchld_mtx.store(unlocked);
+}
+
+
+void Server::release_chlds()
+{
+	int unlocked = 0;
+
+	// This is spinning, but it might only last as long as the insert above
+	while (!sigchld_mtx.compare_exchange_strong(unlocked, 1))
+		;
+
+	for (;sigchld_idx >= 0; --sigchld_idx)
+		logger::logout(sigchld_pids[sigchld_idx].first, sigchld_pids[sigchld_idx].second);
+
+	sigchld_mtx.store(unlocked);
 }
 
 
@@ -266,6 +314,9 @@ int Server::loop()
 		}
 
 		for (;;) {
+
+			// if any ...
+			Server::release_chlds();
 
 			if (type == SOCK_DGRAM) {
 				char c = 0;
@@ -413,6 +464,8 @@ int Server::loop()
 		d_err = "Server::loop: Not possible to use active connect as server in UDP mode.";
 		r = -1;
 	}
+
+	Server::release_chlds();
 
 	return r;
 }

@@ -95,7 +95,7 @@ void sig_chld(int)
 		// If its the real crashd w/o a session, we run as root,
 		// so clean up leaving sessions
 		if (getpid() == global::crashd_pid)
-			logger::logout(pid);
+			Server::add_chld(pid);
 	}
 	return;
 }
@@ -308,26 +308,28 @@ int main(int argc, char **argv)
 			config::user_keys = config::keyfile;
 	}
 
-	Server *s = new (nothrow) Server(config::transport, config::sni);
-	if (!s)
+	Server *server_instance{nullptr};
+	if (!(server_instance = new (nothrow) Server(config::transport, config::sni)))
 		return 1;
 
-	if (s->setup() < 0) {
-		syslog().log(s->why());
-		delete s;
-		return 1;
-	}
+	auto cleanup_func = [&](int fail) {
+		if (fail)
+			syslog().log(server_instance->why());
+		sa.sa_handler = SIG_IGN;
+		sigaction(SIGCHLD, &sa, nullptr);
+		delete server_instance;
+		server_instance = nullptr;
+		if (config::extract_blob)
+			unlink(config::keyfile.c_str());
+		return fail;
+	};
 
-	if (s->loop() < 0) {
-		syslog().log(s->why());
-		delete s;
-		return 1;
-	}
+	if (server_instance->setup() < 0)
+		return cleanup_func(1);
 
-	if (config::extract_blob)
-		unlink(config::keyfile.c_str());
+	if (server_instance->loop() < 0)
+		return cleanup_func(1);
 
-	delete s;
-	return 0;
+	return cleanup_func(0);
 }
 
