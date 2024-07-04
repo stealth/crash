@@ -35,6 +35,7 @@
 
 #include <string>
 #include <sys/types.h>
+#include <sys/time.h>
 
 namespace crash {
 
@@ -49,7 +50,7 @@ public:
 
 	static void login(const std::string&, const std::string&, const std::string&);
 
-	static void logout(pid_t);
+	static void logout(pid_t, const struct timeval &);
 };
 
 
