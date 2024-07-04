@@ -43,6 +43,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/time.h>
 #include "session.h"
 #include "server.h"
@@ -143,7 +144,8 @@ void Server::add_chld(pid_t p)
 	int unlocked = 0;
 
 	struct timeval tv;
-	gettimeofday(&tv, nullptr);
+	tv.tv_sec = time(nullptr);
+	tv.tv_usec = 0;
 
 	// Can't acquire lock? Just return
 	if (!sigchld_mtx.compare_exchange_strong(unlocked, 1))
