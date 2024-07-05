@@ -25,6 +25,8 @@ namespace crash {
 #ifdef LIBRESSL_VERSION_NUMBER
 
 // dirty, but libressl is behind with their API
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 

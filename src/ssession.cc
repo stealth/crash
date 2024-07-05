@@ -188,7 +188,7 @@ int server_session::authenticate()
 
 	char sbuf[MSG_BSIZE] = {0};
 
-	sprintf(sbuf, "A:crash-%hu.%04hu:sign2:rsa1:%hu:", d_major, d_minor, (unsigned short)EVP_MD_size(sha512));
+	snprintf(sbuf, sizeof(sbuf) - 1, "A:crash-%hu.%04hu:sign2:rsa1:%hu:", d_major, d_minor, (unsigned short)EVP_MD_size(sha512));
 	memcpy(sbuf + strlen(sbuf), md, EVP_MD_size(sha512));
 
 	d_err = "server_session::authenticate:: auth exchange";

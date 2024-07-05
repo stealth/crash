@@ -75,7 +75,7 @@ logger &syslog()
 }
 
 
-#if defined ANDROID || defined EMBEDDED
+#if (defined ANDROID) || (defined EMBEDDED) || (defined __OpenBSD__)
 void logger::login(const string &dev, const string &user, const string &host)
 {
 }
