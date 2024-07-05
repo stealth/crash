@@ -49,26 +49,35 @@ your VPS via `1.2.3.5` then.
 There is an [official WA docu](https://github.com/WhatsApp/proxy) that uses a bit overblown docker setup with `haproxy`.
 To boil it down - if you read all the configs - the messenger app is just expecting a simple port forward from the proxy
 to `g.whatsapp.net:5222`. Meta seems to use DNS based load balancing so you may get different addresses
-than me, but for me it resolves to `185.60.217.54` or `2a03:2880:f21c:81c6:face:b00c:0:7260` in IPv6 case.
+than me, but for me it resolves to `185.60.217.54` or `2a03:2880:f276:d0:face:b00c:0:7260` in IPv6 case.
+Thats for the `Chat port`. For `Media port` they are using `mmg.whatsapp.net:443` which resolves to
+`57.144.111.32` or `2a03:2880:f32e:122:face:b00c:0:167`.
 
 Given that you manage to establish a connection to your VPS in the steps before, you do:
 
 ```
-$ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[185.60.217.54]:5222 -l user -i authkey.priv -v
+$ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[185.60.217.54]:5222 \
+ -T 1236:[57.144.111.32]:443 -l user -i authkey.priv -v
 ```
 
 or
 
 ```
- $ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[2a03:2880:f21c:81c6:face:b00c:0:7260]:5222 -l user -i authkey.priv -v
+ $ crashc -X 192.168.0.123 -S yourSNI -D -H $VPS -T 1235:[2a03:2880:f276:d0:face:b00c:0:7260]:5222 \
+ -T 1236:[2a03:2880:f32e:122:face:b00c:0:167]:443 -l user -i authkey.priv -v
 
 ```
 
 (using DTLS in this example and WA's IPv6 endpoint in the 2nd case)
 
-In your WA messenger, go to `Settings` -> `Storage and data` -> `Proxy settings` and set it to
-`192.168.0.123:1235`. It assumes that your phone is connected via wifi and using the same `192.168.0.0` network,
-as your *crashc* session is.
+In your WA messenger, go to `Settings` -> `Storage and data` -> `Proxy settings` and set it to:
+
+* Proxy host: `192.168.0.123`
+* Chat port: `1235` and leave the `Use TLS` box unchecked. No worries - you will still get encrypted comms.
+* Media port: `1236`
+
+It assumes that your phone is connected via Wifi and using the same `192.168.0.0` network
+as your *crashc* session which runs on the machine that has a LAN (wired or Wifi) IP of `192.168.0.123`.
 
 ## Telegram
 
