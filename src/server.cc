@@ -43,6 +43,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <poll.h>
 #include <time.h>
 #include <sys/time.h>
 #include "session.h"
@@ -162,7 +163,10 @@ void Server::release_chlds()
 {
 	int unlocked = 0;
 
-	// This is spinning, but it might only last as long as the insert above
+	// This is not spinning, as we are not concurrent with other threads, but only
+	// with outselfes if a signal is delivered. Therefore, when inside a signal handler and the
+	// mtx is hold, we will never be here. So the line below could actually just be an
+	// atomic set to 1, since the wile loop will always succeed at the first try.
 	while (!sigchld_mtx.compare_exchange_strong(unlocked, 1))
 		;
 
@@ -317,6 +321,15 @@ int Server::loop()
 
 			// if any ...
 			Server::release_chlds();
+
+			// In silent mode, we just sleep on the socket, but in non-silent mode we want regular interval
+			// checks whether utmpx entries need to be removed.
+			if (!config::silent) {
+				pollfd pfd = { d_sock_fd, POLLIN, 0 };
+
+				if (poll(&pfd, 1, TCP_POLL_TO) != 1)
+					continue;
+			}
 
 			if (type == SOCK_DGRAM) {
 				char c = 0;
