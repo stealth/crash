@@ -512,11 +512,14 @@ int client_session::authenticate()
 	         d_major, d_minor, config::user.c_str(),
 	         (unsigned short)config::cmd.length(), config::cmd.c_str(),
 	         (unsigned short)resplen);
-	if (resplen > sizeof(sbuf) - strlen(sbuf))
+	size_t apkt_len = strlen(sbuf);
+	if (resplen > sizeof(sbuf) - apkt_len)
 		return -1;
-	memcpy(sbuf + strlen(sbuf), resp, resplen);
+	memcpy(sbuf + apkt_len, resp, resplen);
+	apkt_len += resplen;
 
-	rewrite2: ssize_t n = SSL_write(d_ssl, sbuf, MSG_BSIZE);
+	// blind real packet len when sending
+	rewrite2: ssize_t n = SSL_write(d_ssl, sbuf, rnd_between(apkt_len, sizeof(sbuf)));
 	switch (SSL_get_error(d_ssl, n)) {
 		case SSL_ERROR_NONE:
 			break;
@@ -815,6 +818,10 @@ int client_session::handle()
 	// via different ping types
 	if (config::traffic_flags & TRAFFIC_NOPAD)
 		tx_add(d_peer_fd, "00006:C:P0:");
+	else if (config::traffic_flags & TRAFFIC_PADRND)
+		tx_add(d_peer_fd, "00006:C:P1:");
+	else if (config::traffic_flags & TRAFFIC_PAD1)
+		tx_add(d_peer_fd, "00006:C:P4:");
 	else if (config::traffic_flags & TRAFFIC_PADMAX)
 		tx_add(d_peer_fd, "00006:C:P9:");
 
@@ -934,7 +941,7 @@ int client_session::handle()
 					continue;
 				}
 
-				tx_add(d_peer_fd, slen(6 + r) + ":D:I0:" + string(stdin_buf, r));	// input from 0
+				tx_add_mult(d_peer_fd, slen(6 + r) + ":D:I0:" + string(stdin_buf, r));	// input from 0
 				d_pfds[d_peer_fd].events |= POLLOUT;
 
 			} else if (d_fd2state[i].state == STATE_STDOUT || d_fd2state[i].state == STATE_STDERR) {
@@ -1132,7 +1139,7 @@ int client_session::handle()
 						d_pfds[d_peer_fd].events |= POLLOUT;
 						continue;
 					}
-					tx_add(d_peer_fd, slen(7 + d_fd2state[i].rnode.size() + r) + ":C:T:S:" + d_fd2state[i].rnode + string(sbuf, r));
+					tx_add_mult(d_peer_fd, slen(7 + d_fd2state[i].rnode.size() + r) + ":C:T:S:" + d_fd2state[i].rnode + string(sbuf, r));
 					d_pfds[d_peer_fd].events |= POLLOUT;
 					d_fd2state[i].time = d_now;
 

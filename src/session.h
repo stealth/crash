@@ -141,6 +141,8 @@ protected:
 
 	int tx_add(int, const std::string &);
 
+	int tx_add_mult(int, const std::string &);
+
 	int tx_remove(int i, string::size_type);
 
 	strview tx_string(int fd, std::string &bk_str)

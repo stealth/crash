@@ -53,7 +53,7 @@ void help(const char *p)
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-L [ip]:port] [-i auth keyfile]\n"
 	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
-	       "\t [-R level] [-N] [-x socks5://[ip]:port] [-t ticket] [-G str] <-l user>\n\n"
+	       "\t [-R b:m] [-N] [-x socks5://[ip]:port] [-t ticket] [-G str] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
 	       "\t -v -- be verbose\n"
 	       "\t -H -- host to connect to; if omitted: passive (default)\n"
@@ -71,7 +71,7 @@ void help(const char *p)
 	       "\t -T -- forward TCP port lport to ip:rport on remote site\n"
 	       "\t -4 -- start SOCKS4 server on lport to forward TCP sessions\n"
 	       "\t -5 -- start SOCKS5 server on lport to forward TCP sessions\n"
-	       "\t -R -- traffic blinding level (0-6, default 1)\n"
+	       "\t -R -- traffic blinding level (0-9) and multiply factor, default 4:0\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
 	       "\t -S -- SNI to use\n"
 	       "\t -t -- ticket-file to use for suspend/resume\n"
@@ -93,7 +93,8 @@ int main(int argc, char **argv)
 	struct sigaction sa;
 	string ostr = "";
 
-	int c = 0, traffic_policy = 1;
+	int c = 0;
+	uint32_t traffic_policy = 4;
 	char lport[16] = {0}, port_hex[16] = {0}, ip[128] = {0}, sni[128] = {0};
 	uint16_t rport = 0;
 
@@ -152,7 +153,10 @@ int main(int argc, char **argv)
 			config::verbose = 1;
 			break;
 		case 'R':
-			traffic_policy = atoi(optarg);
+			if (sscanf(optarg, "%u:%u", &traffic_policy, &config::traffic_multiply) != 2) {
+				fprintf(stderr, "crashc: Expect level:factor style argument for -R. Check docu.\n");
+				return 1;
+			}
 			break;
 		case 'T':
 			if (sscanf(optarg, "%15[0-9]:[%127[^]]]:%hu", lport, ip, &rport) == 3) {
@@ -218,29 +222,40 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (traffic_policy < 0 || traffic_policy > 6)
-		traffic_policy = 1;
+	if (traffic_policy < 0 || traffic_policy > 9)
+		traffic_policy = 4;
 
 	switch (traffic_policy) {
 	case 0:
 		config::traffic_flags = TRAFFIC_NOPAD;
 		break;
 	case 1:
-		config::traffic_flags = TRAFFIC_PAD1;
+		config::traffic_flags = TRAFFIC_PADRND;
 		break;
 	case 2:
-		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
+		config::traffic_flags = TRAFFIC_PADRND|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
 		break;
 	case 3:
-		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT;
+		config::traffic_flags = TRAFFIC_PADRND|TRAFFIC_INJECT;
 		break;
+
 	case 4:
-		config::traffic_flags = TRAFFIC_PADMAX;
+		config::traffic_flags = TRAFFIC_PAD1;
 		break;
 	case 5:
-		config::traffic_flags = TRAFFIC_PADMAX|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
+		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
 		break;
 	case 6:
+		config::traffic_flags = TRAFFIC_PAD1|TRAFFIC_INJECT;
+		break;
+
+	case 7:
+		config::traffic_flags = TRAFFIC_PADMAX;
+		break;
+	case 8:
+		config::traffic_flags = TRAFFIC_PADMAX|TRAFFIC_INJECT|TRAFFIC_PING_IGN;
+		break;
+	case 9:
 		config::traffic_flags = TRAFFIC_PADMAX|TRAFFIC_INJECT;
 	}
 

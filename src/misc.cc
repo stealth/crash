@@ -45,6 +45,9 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+extern "C" {
+#include <openssl/rand.h>
+}
 #include "config.h"
 #include "misc.h"
 #include "global.h"
@@ -135,6 +138,16 @@ size_t prepend_seq(sequence_t n, string &s)
 }
 
 
+size_t rnd_between(size_t min, size_t max)
+{
+	size_t rnd = 0;
+	if (min >= max || RAND_bytes(reinterpret_cast<unsigned char *>(&rnd), sizeof(size_t)) != 1)
+		return min;
+	rnd %= (max - min);
+	return min + rnd;
+}
+
+
 size_t pad_nops(string &s)
 {
 
@@ -155,6 +168,8 @@ size_t pad_nops(string &s)
 
 	if (config::traffic_flags & TRAFFIC_PADMAX) {
 		pads = PMAX_SIZE - l - nop_fix;
+	} else if (config::traffic_flags & TRAFFIC_PADRND) {
+		pads = rnd_between(0, PMAX_SIZE - l - nop_fix);
 	} else {
 		if (l + nop_fix > 1024)
 			pads = PMAX_SIZE - l - nop_fix;

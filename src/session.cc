@@ -101,6 +101,24 @@ session::~session()
 }
 
 
+int session::tx_add_mult(int fd, const string &s)
+{
+	tx_add(fd, s);
+
+	// If traffic multiplier is configured, do so for data packets
+	if (config::traffic_multiply > 1 && d_fd2state[fd].state == STATE_SSL) {
+		for (uint32_t i = 1; i < config::traffic_multiply; ++i) {
+			string np = "";
+
+			if (pad_nops(np) > 0)
+				tx_add(fd, np);
+		}
+	}
+
+	return 0;
+}
+
+
 int session::tx_add(int fd, const string &s)
 {
 	d_fd2state[fd].tx_len += s.size();
@@ -171,13 +189,17 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 			else
 				sv = { d_fd2state[fd].ovec[0].c_str(), d_fd2state[fd].ovec[0].size() };
 		} else {
+			bool nop_only = 0;
 			auto it = d_fd2state[fd].ovec.begin();
 			for (; it != d_fd2state[fd].ovec.end(); ++it) {
 
-				// SQ-packets and already sequenced packets (via d_tx_map<> resend) only as single dgrams
-				if (it->find("C:SQ:") == 6 || it->find("C:PN:") == 6) {
-					if (bk_str.empty())
+				// SQ-packets, already sequenced packets (via d_tx_map<> resend) and pure NOPs only as single dgrams
+				if (it->find("C:SQ:") == 6 || it->find("C:PN:") == 6 || it->find("C:NO:") == 6) {
+					if (bk_str.empty()) {
+						if (it->find("C:NO:") == 6)
+							nop_only = 1;
 						bk_str = *it++;
+					}
 					break;
 				}
 				if (bk_str.size() + it->size() + SEQ_PSIZE <= max)
@@ -198,7 +220,10 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 			// in which case no new seq# is added and 'seq' stays 0 to signal this.
 			if (prepend_seq(d_flow.tx_sequence, bk_str) > 0)
 				seq = d_flow.tx_sequence;
-			pad_nops(bk_str);
+
+			// If it was a single NOP pkt, its already padded
+			if (!nop_only)
+				pad_nops(bk_str);
 
 			// dgram case needs to have strview of backing string returned, as content was removed from ovec
 			return sv = bk_str;
@@ -397,6 +422,12 @@ int session::handle_input(int i)
 	// disable traffic padding
 	} else if (cmd.find("C:P0:", 6) == 6) {
 		config::traffic_flags |= TRAFFIC_NOPAD;
+	} else if (cmd.find("C:P1:", 6) == 6) {
+		config::traffic_flags &= ~TRAFFIC_NOPAD;
+		config::traffic_flags |= TRAFFIC_PADRND;
+	} else if (cmd.find("C:P4:", 6) == 6) {
+		config::traffic_flags &= ~TRAFFIC_NOPAD;
+		config::traffic_flags |= TRAFFIC_PAD1;
 	// enable maximum padding
 	} else if (cmd.find("C:P9:", 6) == 6) {
 		config::traffic_flags &= ~TRAFFIC_NOPAD;

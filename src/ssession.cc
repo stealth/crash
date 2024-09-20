@@ -189,12 +189,14 @@ int server_session::authenticate()
 	char sbuf[MSG_BSIZE] = {0};
 
 	snprintf(sbuf, sizeof(sbuf) - 1, "A:crash-%hu.%04hu:sign2:rsa1:%hu:", d_major, d_minor, (unsigned short)EVP_MD_size(sha512));
-	memcpy(sbuf + strlen(sbuf), md, EVP_MD_size(sha512));
+	size_t apkt_len = strlen(sbuf);
+	memcpy(sbuf + apkt_len, md, EVP_MD_size(sha512));
+	apkt_len += EVP_MD_size(sha512);
 
 	d_err = "server_session::authenticate:: auth exchange";
 
-	// write singing-request to client
-	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, MSG_BSIZE);
+	// write singing-request to client, blind actual packet size between real len and max len
+	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, rnd_between(apkt_len, sizeof(sbuf)));
 	switch (SSL_get_error(d_ssl, n)) {
 	case SSL_ERROR_NONE:
 		break;

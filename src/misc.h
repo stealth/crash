@@ -93,7 +93,8 @@ enum {
 
 	TRAFFIC_NOPAD		=	0x00001,
 	TRAFFIC_PAD1		=	0x00002,
-	TRAFFIC_PADMAX		=	0x00004,
+	TRAFFIC_PADRND		=	0x00004,
+	TRAFFIC_PADMAX		=	0x00008,
 	TRAFFIC_PING_IGN	=	0x01000,
 	TRAFFIC_INJECT		=	0x10000,
 
@@ -133,6 +134,8 @@ int readn(int fd, void *buf, size_t len);
 int flush_fd(int, const std::string &);
 
 size_t prepend_seq(sequence_t, std::string &);
+
+size_t rnd_between(size_t, size_t);
 
 size_t pad_nops(std::string &);
 

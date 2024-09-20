@@ -9,7 +9,7 @@ namespace config
 	bool verbose = 0, silent = 0, v6 = 0, uid_change = 1, wrap = 0,
 	     always_login = 0, extract_blob = 0, no_hk_check = 0, no_net = 0, socks5_dns = 0, allow_roam = 0;
 
-	uint32_t traffic_flags = crash::TRAFFIC_PAD1;
+	uint32_t traffic_flags = crash::TRAFFIC_PAD1, traffic_multiply = 0;
 
 	std::string keyfile = "./serverkey.priv", certfile = "./serverkey.pub";
 	std::string host = "", port = "2222", laddr = "0.0.0.0", lport = "2222", local_proxy_ip = "127.0.0.1", sni = "", ticket = "";
