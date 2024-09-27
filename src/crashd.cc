@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2023 Sebastian Krahmer.
+ * Copyright (C) 2009-2024 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
 			printf("%s\r\n\r\n", argv[i]);
 	}
 
-	printf("\ncrypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash\n\n");
+	printf("\ncrypted admin shell (C) 2024 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
 	char ip[128] = {0}, lport[16] = {0}, prefix[128] = {0}, action[256] = {0};
 

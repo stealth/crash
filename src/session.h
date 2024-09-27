@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2024 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -117,7 +117,7 @@ protected:
 
 	unsigned int d_chunk_size{TCP_CHUNK_SIZE};
 
-	uint16_t d_major{3}, d_minor{5};	// keep in-sync with server_session::d_banner
+	uint16_t d_major{3}, d_minor{6};	// keep in-sync with server_session::d_banner
 
 	// whether suspend signal was received, which needs different
 	// connection teardown in destructor
@@ -237,7 +237,7 @@ class server_session : public session {
 	SSL_CTX *d_ssl_ctx0{nullptr};	// not owning
 
 	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""}, d_peer_ip{""};
-	std::string d_banner{"1000 crashd-3.0005 OK\r\n"};	// keep in sync with d_major and d_minor
+	std::string d_banner{"1000 crashd-3.0006 OK\r\n"};	// keep in sync with d_major and d_minor
 
 	iobox d_iob;
 

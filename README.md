@@ -126,38 +126,39 @@ runtime switches:
 ```
 stealth@linux ~> ./crashd -h
 
+crypted admin shell (C) 2024 Sebastian Krahmer https://github.com/stealth/crash
 
-crypted admin shell (C) 2023 Sebastian Krahmer https://github.com/stealth/crash
 
+Usage:  ./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
+         [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]
+         [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]
+         [-x socks5://[ip]:port] [-G method:prefix:action] [-w]
 
-Usage:	./crashd [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]
-	 [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]
-	 [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]
-	 [-x socks5://[ip]:port] [-w]
+         -a -- always login if authenticated, despite false/nologin shells
+         -U -- run as user (e.g. turn off setuid() calls) if invoked as such
+         -e -- extract key and certfile from the binary itself (no -k/-c needed)
+         -q -- quiet mode, turns off logging and utmp entries
+         -6 -- use IPv6 rather than IPv4
+         -w -- setproctitle to `[kthreadd]` (must be last arg!)
+         -H -- host to connect to; if omitted: passive connect (default)
+         -p -- port to connect to when active connect; default is 2222
+         -L -- local [ip]:port used for binding ([0.0.0.0]:2222)
+         -g -- file containing list of good IP/IP6's in D/DoS case (default off)
+         -A -- authorized-key file for users if starts with '/'; folder inside ~
+               containing authorized_keys file otherwise; 'self' means to use
+               blob-extraction (see -e); default is .crash
+         -k -- servers key file; default is ./serverkey.priv
+         -c -- X509 certificate-file that belongs to serverkey (-k);
+               default is ./serverkey.pub
+         -t -- watch triggerfile for certain message (-m) before connect/listen
+         -m -- wait with connect/listen until message in file (-t) is seen
+         -N -- disable TCP/UDP port forwarding
+         -D -- use DTLS transport (requires -S)
+         -x -- use this SOCKS5 proxy when using active connect
+         -R -- allow clients to roam sessions
+         -G -- Traffic Disguise Filters, check docu
+         -S -- SNI to hide behind
 
-	 -a -- always login if authenticated, despite false/nologin shells
-	 -U -- run as user (e.g. turn off setuid() calls) if invoked as such
-	 -e -- extract key and certfile from the binary itself (no -k/-c needed)
-	 -q -- quiet mode, turns off logging and utmp entries
-	 -6 -- use IPv6 rather than IPv4
-	 -w -- setproctitle to `[kthreadd]` (must be last arg!)
-	 -H -- host to connect to; if omitted: passive connect (default)
-	 -p -- port to connect to when active connect; default is 2222
-	 -L -- local [ip]:port used for binding ([0.0.0.0]:2222)
-	 -g -- file containing list of good IP/IP6's in D/DoS case (default off)
-	 -A -- authorized-key file for users if starts with '/'; folder inside ~
-	       containing authorized_keys file otherwise; 'self' means to use
-	       blob-extraction (see -e); default is .crash
-	 -k -- servers key file; default is ./serverkey.priv
-	 -c -- X509 certificate-file that belongs to serverkey (-k);
-	       default is ./serverkey.pub
-	 -t -- watch triggerfile for certain message (-m) before connect/listen
-	 -m -- wait with connect/listen until message in file (-t) is seen
-	 -N -- disable TCP/UDP port forwarding
-	 -D -- use DTLS transport (requires -S)
-	 -x -- use this SOCKS5 proxy when using active connect
-	 -R -- allow clients to roam sessions
-	 -S -- SNI to hide behind
 ```
 
 Most of it is pretty self-explaining. *crashd* can run as user. `-U` lets *crashd*
@@ -446,10 +447,15 @@ Suspend/Resume does not work yet with *LibreSSL* builds, but roaming does.
 Mitigating traffic analysis
 ---------------------------
 
-Traffic analysis mitigation has two goals. First, to make it hard to find out actual typing
-sequences and potential info leaks about whats being typed inside an encrypted, interactive
-channel. Second, to make it hard for a (semi-)global observer to track connections streams
-across packet mixes or hubs.
+Traffic analysis mitigation has differant goals:
+
+* make it hard to find out actual typing sequences and potential info leaks about whats being typed
+* make it hard for a global observer to track connection streams across packet mixes or hubs
+* make it hard for censors to identify/distinguish crash sessions from a set of "legit" connections
+
+It is not possible to reach all three goals at the same time, e.g. you want randomized packet sizes
+to make it hard for observers to know you are using a *crash* session, but this will also make
+your packet stream unique across mixes.
 
 Completely mitigating traffic analysis for a capable (global) observer is very hard.
 It would require many crash users so to sink all individual packets in a swarm and
@@ -459,22 +465,34 @@ constant delay between the sends to make all connections look equal. Even then, 
 still the problem of the overall amount of traffic sent that may be measured and used
 to track individuals. As having constant size and delays would make the connection
 feel slow or even unusable, *crash* lets you choose between traffic policies which are
-controlled by `-R <value>`. *Value* is an integer with the following meaning:
+controlled by `-R <level:factor>` at client side. *Level* is an integer with the following meaning:
 
-* 0: disable all padding of payloads and don't inject random traffic. The pure feeling!
-* 1: pad payload to the next 256, 512, 1024 or 1320 byte boundary, no injects (default)
-* 2: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects client side
-* 3: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects with server
-  responses
-* 4: pad payload to 1320 byte boundary, no injects
-* 5: pad payload to 1320 byte boundary, random injects client side
-* 6: pad payload to 1320 byte boundary, random injects with server responses
+* 0: disable all padding of payloads and do not inject random traffic
+
+* 1: pad payload to rand size up to 1320 byte boundary, no injects
+* 2: pad payload to rand size up to 1320 byte boundary, random injects client side
+* 3: pad payload to rand size up to 1320 byte boundary, random injects with server responses
+
+* 4: pad payload to the next 256, 512, 1024 or 1320 byte boundary, no injects (default)
+* 5: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects client side
+* 6: pad payload to the next 256, 512, 1024 or 1320 byte boundary, random injects with server
+     responses
+
+* 7: pad payload to 1320 byte boundary, no injects
+* 8: pad payload to 1320 byte boundary, random injects client side
+* 9: pad payload to 1320 byte boundary, random injects with server responses
+
+*Factor* is a multiply factor `1..100` that adds as many NOP packets per real packet in order
+to make it harder to match amount of input traffic to output traffic on proxy hosts.
 
 1320 is crashds internally used MSS. The values were chosen in a way so that sent data fits most
 likely into a single packet. Note however that these are the packet sizes (plus the TLS record size)
 as it is passed to the TCP stack. TCP will decide itself how it will send the segments. There is
 no way to enforce 'TCP packet sizes', but this does not matter as the deps to the actual payload
 size is already blurred.
+
+A higher *Level* does not automatically mean a better analysis mitigation. You have to chose the best
+`-R <level:factor>` depending on your personal needs.
 
 In DTLS mode there are always ping packets in order to implement synchronization and flow control.
 
@@ -569,6 +587,16 @@ Note that in the download case you must not specify the `-v` switch since this w
 the verbose output to the `local.file`. For `-c` commands, *crash* will forward `stdout` and
 `stderr` separated to the local tty's fd 1 and 2, so above commands add a nice progress bar
 during the xfer.
+
+
+MTU/MSS
+-------
+
+*crash* is assuming a MTU of 1500 and using a MSS of 1320, so that TLS record layer and some other
+meta data fits into this MTU and even into network devices with smaller MTU ~1400, which should fit with most
+VPN setups etc.. If you are using DTLS mode (that is UDP) and a VPN or whatever with a much smaller MTU,
+you might want to compile *crash* with lower values which you can change in `misc.h`. If you are using TCP,
+i.e. not using the `-D` switch, these values do not matter for you.
 
 
 DoS mitigation
