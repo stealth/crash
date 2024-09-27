@@ -998,6 +998,9 @@ int client_session::handle()
 						d_pfds[i].events |= POLLOUT;
 				}
 
+				if (!tx_empty(i))
+					d_pfds[i].events |= POLLOUT;
+
 				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 
 					ssl_read_wants_write = 0;

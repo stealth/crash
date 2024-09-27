@@ -466,7 +466,10 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 	}
 
 	if (d_sni.size()) {
-		string peer_sni = SSL_get_servername(d_ssl, TLSEXT_NAMETYPE_host_name);
+		string peer_sni = "";
+		const char *psnir = nullptr;
+		if ((psnir = SSL_get_servername(d_ssl, TLSEXT_NAMETYPE_host_name)))
+			peer_sni = psnir;
 		if (d_sni != peer_sni) {
 			d_err = "server_session: Wrong SNI by client. Rejecting.";
 			return -1;
@@ -846,6 +849,9 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 					if (ssl_read_wants_write || d_last_ssl_qlen > 0)
 						d_pfds[i].events |= POLLOUT;
 				}
+
+				if (!tx_empty(i))
+					d_pfds[i].events |= POLLOUT;
 
 				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 

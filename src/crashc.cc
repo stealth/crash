@@ -224,6 +224,8 @@ int main(int argc, char **argv)
 
 	if (traffic_policy < 0 || traffic_policy > 9)
 		traffic_policy = 4;
+	if (config::traffic_multiply < 1 || config::traffic_multiply > 100)
+		config::traffic_multiply = 1;
 
 	switch (traffic_policy) {
 	case 0:

@@ -182,14 +182,14 @@ size_t pad_nops(string &s)
 	}
 
 	// Huh?
-	if (pads <= 0 || 5 + 6 + pads >= PMAX_SIZE)
+	if (pads <= 0 || nop_fix + pads > PMAX_SIZE)
 		return 0;
 
 	s += slen(6 + pads);
 	s += ":C:NO:";
 	s += string(zeros, pads);
 
-	return 5 + 6 + pads;
+	return nop_fix + pads;
 }
 
 

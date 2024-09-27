@@ -88,7 +88,8 @@ int disguise_filter(SSL *ssl)
 		ssize_t n = SSL_peek(ssl, buf, sizeof(buf));
 		switch (SSL_get_error(ssl, n)) {
 		case SSL_ERROR_NONE:
-			req += string(buf, n);
+			if (n > 0)
+				req += string(buf, n);
 			break;
 		case SSL_ERROR_WANT_WRITE:
 		case SSL_ERROR_WANT_READ:
@@ -141,7 +142,7 @@ int disguise_filter(SSL *ssl)
 		return 0;
 	}
 
-	r = regex("\r\nHost: *[a-zA-Z0-9-_:]+\r\n");
+	r = regex("\r\nHost: *[\\.a-zA-Z0-9-_:]+\r\n");
 	if (regex_search(req, r) != 1) {
 		SSL_write(ssl, bad.c_str(), bad.size());
 		return 0;
