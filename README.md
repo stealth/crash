@@ -2,14 +2,14 @@ CRypted Admin SHell
 ===================
 
 <p align="center">
-<img src="https://github.com/stealth/crash/blob/master/logo.jpg" />
+<img src="https://github.com/stealth/crash/blob/master/bridge.jpg" />
 </p>
 
 An SSH alternative featuring:
 
 * IPv6 ready
 * lightweight, straight forward and extensible protocol using TLS 1.3
-  or optionally DTLS 1.2 as transport layer
+  or optionally DTLS 1.2 or QUIC as transport layer
 * man-in-the-middle safe due to its authentication mechanism
   which involves the servers host key into the auth process
 * built-in traffic blinding against timing and packet-size info-leak attacks
@@ -89,6 +89,11 @@ $ cd src; ./newdh
 before `make` in order to generate DH parameters before the build. Thats not strictly necessary
 as of TLS 1.3, since the Kex will most likely chose one of the ECDH variants, but if you customize
 your setup, it is recommended to generate your own DH params.
+
+If you want to use the experimental QUIC transport mode, you need to install `OpenSSL >= 3.5.0-beta1`
+and adjust the `Makefile` to `HAVE_QUIC` and the *OpenSSL* install path, similar to that which
+is commented out. You possibly also need to adjust the path of the openssl binary inside `newdh`
+if you were not using *OpenSSL3* already, and invoke `newdh` before the build.
 
 
 Legacy builds
@@ -621,5 +626,11 @@ connections this allows to have no more than 12 'hanging'
 crashd's at the same time, still allowing you to login
 if you are listed in good-IPs and your underlying TCP/IP stack
 is not already trashed.
+
+<p align="center">
+<a href="https://github.com/c-skills/welcome">
+<img src="https://github.com/c-skills/welcome/blob/master/logo-black.jpg"/>
+</a>
+</p>
 
 
