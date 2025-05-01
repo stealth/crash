@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2024 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -119,9 +119,6 @@ server_session::server_session(int fd, const string &transport, const string &sn
 			d_peer_ip = dst;
 	}
 
-	if (d_type == SOCK_DGRAM)
-		d_chunk_size = UDP_CHUNK_SIZE;
-
 	if (sni.size()) {
 		d_sni = sni;
 		d_banner = sni;
@@ -187,16 +184,18 @@ int server_session::authenticate()
 		return -1;
 
 	char sbuf[MSG_BSIZE] = {0};
+	size_t sblen = sizeof(sbuf);
+	if (quic())
+		sblen = QUIC_MSS;	// reduce to (somewhat lower) QUIC_MSS for perf reasons so it fits into single packet
 
-	snprintf(sbuf, sizeof(sbuf) - 1, "A:crash-%hu.%04hu:sign2:rsa1:%hu:", d_major, d_minor, (unsigned short)EVP_MD_size(sha512));
+	snprintf(sbuf, sblen - 1, "A:crash-%hu.%04hu:sign2:rsa1:%hu:", d_major, d_minor, (unsigned short)EVP_MD_size(sha512));
 	size_t apkt_len = strlen(sbuf);
 	memcpy(sbuf + apkt_len, md, EVP_MD_size(sha512));
 	apkt_len += EVP_MD_size(sha512);
 
 	d_err = "server_session::authenticate:: auth exchange";
 
-	// write singing-request to client, blind actual packet size between real len and max len
-	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, rnd_between(apkt_len, sizeof(sbuf)));
+	rewrite: ssize_t n = SSL_write(d_ssl, sbuf, sblen);
 	switch (SSL_get_error(d_ssl, n)) {
 	case SSL_ERROR_NONE:
 		break;
@@ -212,8 +211,11 @@ int server_session::authenticate()
 	}
 
 	char rbuf[MSG_BSIZE + 1] = {0}, cmdbuf[256] = {0}, ubuf[64] = {0}, token[1024] = {0};
+	size_t rblen = MSG_BSIZE;
+	if (quic())
+		rblen = QUIC_MSS;
 
-	reread: ssize_t r = SSL_read(d_ssl, rbuf, MSG_BSIZE);
+	reread: ssize_t r = SSL_read(d_ssl, rbuf, rblen);
 	switch (SSL_get_error(d_ssl, r)) {
 	case SSL_ERROR_NONE:
 		break;
@@ -415,13 +417,26 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		}
 	}
 
-	if ((d_ssl = SSL_new(ssl_ctx)) == nullptr) {
-		d_err = "server_session::handle::SSL_new:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
+	if (quic()) {
+
+		// QUIC sockets need to be non-blocking at fd-layer but can be blocking at app-layer via SSL_set_blocking_mode()
+		// (called later)
+		nonblock(d_peer_fd);
+
+		if ((d_ssl = crash::SSL_new_listener(ssl_ctx, crash::LISTENER_FLAG_NO_VALIDATE)) == nullptr) {
+			d_err = "server_session::handle::SSL_new_listener:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+	} else {
+		if ((d_ssl = SSL_new(ssl_ctx)) == nullptr) {
+			d_err = "server_session::handle::SSL_new:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
 	}
 
-	if (config::allow_roam && d_type == SOCK_DGRAM)
+	if (quic() || (config::allow_roam && dgram()))
 		d_bio = BIO_new_dgram(d_peer_fd, BIO_NOCLOSE);
 	else
 		d_bio = BIO_new_socket(d_peer_fd, BIO_NOCLOSE);
@@ -440,7 +455,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 	SSL_set0_wbio(d_ssl, d_bio);
 #endif
 
-	if (d_type == SOCK_DGRAM) {
+	if (dgram()) {
 
 #ifndef BORINGSSL_API_VERSION
 		// DTLS_set_link_mtu(d_ssl, MTU) for openssl
@@ -451,7 +466,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		// of this "DoS protection" (as per RFC), since crashd only accepts one new UDP session
 		// per second.
 #ifdef HAVE_DTLS_LISTEN
-		if (DTLSv1_listen(d_ssl, d_dlisten_param) <= 0) {
+		if (dtls() && DTLSv1_listen(d_ssl, d_dlisten_param) <= 0) {
 			d_err = "server_session::handle::DTLSv1_listen:";
 			d_err += ERR_error_string(ERR_get_error(), nullptr);
 			return -1;
@@ -459,10 +474,43 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 #endif
 	}
 
-	if (SSL_accept(d_ssl) <= 0) {
-		d_err = "server_session::handle::SSL_accept:";
-		d_err += ERR_error_string(ERR_get_error(), nullptr);
-		return -1;
+	if (quic()) {
+		static const unsigned char alpn[] = {
+			8, 'h', 't', 't', 'p', '/', '1', '.', '1',
+			2, 'h', '2'
+		};
+
+		auto cb = [](SSL *ssl, const unsigned char **out, unsigned char *out_len, const unsigned char *in, unsigned int in_len, void *arg) -> int
+		{
+			if (SSL_select_next_proto((unsigned char **)out, out_len, alpn, sizeof(alpn), in, in_len) == OPENSSL_NPN_NEGOTIATED)
+				return SSL_TLSEXT_ERR_OK;
+			return SSL_TLSEXT_ERR_ALERT_FATAL;
+		};
+		crash::SSL_CTX_set_alpn_select_cb(ssl_ctx, cb, nullptr);
+		crash::SSL_set_blocking_mode(d_ssl, 1);
+
+		if (crash::SSL_listen(d_ssl) != 1) {
+			d_err = "server_session::handle::SSL_listen:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+
+		SSL *ssla = nullptr;
+
+		if (!(ssla = crash::SSL_accept_connection(d_ssl, 0))) {
+			d_err = "server_session::handle::SSL_accept_connection:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+
+		SSL_free(d_ssl);
+		d_ssl = ssla;
+	} else {
+		if (SSL_accept(d_ssl) <= 0) {
+			d_err = "server_session::handle::SSL_accept:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
 	}
 
 	if (d_sni.size()) {
@@ -476,7 +524,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		}
 	}
 
-	if (config::allow_roam && d_type == SOCK_DGRAM)
+	if (config::allow_roam && dgram())
 		BIO_ctrl(d_bio, BIO_CTRL_DGRAM_GET_PEER, 0, d_bio_peer);
 
 	if (disguise_filter(d_ssl) != 1) {
@@ -653,11 +701,15 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 	d_pfds[d_peer_fd].events = POLLIN;
 
 	// only now set non-blocking mode and moving write buffers
-	if (d_type == SOCK_STREAM) {
-		int flags = fcntl(d_peer_fd, F_GETFL);
-		fcntl(d_peer_fd, F_SETFL, flags|O_NONBLOCK);
+	if (tls())
+		nonblock(d_peer_fd);
+
+	if (!dtls())
 		SSL_set_mode(d_ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
-	}
+
+	// fd-layer already had set non-blocking fd for QUIC
+	if (quic())
+		crash::SSL_set_blocking_mode(d_ssl, 0);
 
 	d_max_fd = d_peer_fd;
 
@@ -698,6 +750,16 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 		if (pipe_child_exited && tx_empty(d_peer_fd) && d_tx_map.empty())
 			d_poll_to.next = d_poll_to.min;
 
+		// This is the session and d_ssl valid, so in each cycle call the OpenSSL QUIC tick function if necessary.
+		if (quic()) {
+			int infinite = 0;
+			timeval tv;
+			memset(&tv, 0, sizeof(tv));
+			crash::SSL_get_event_timeout(d_ssl, &tv, &infinite);
+			if (tv.tv_sec == 0 && tv.tv_usec <= d_poll_to.next && infinite == 0)
+				crash::SSL_handle_events(d_ssl);
+		}
+
 		if ((r = poll(d_pfds, d_max_fd + 1, d_poll_to.next)) <= 0) {
 
 			// signal caught
@@ -713,7 +775,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 				return -1;
 		}
 
-		if (d_type == SOCK_DGRAM && ((r == 0 && tx_empty(d_peer_fd)) || tx_must_add_sq(d_peer_fd)))
+		if (dtls() && ((r == 0 && tx_empty(d_peer_fd)) || tx_must_add_sq(d_peer_fd)))
 			tx_add_sq(d_peer_fd);
 
 		d_now = time(nullptr);
@@ -734,6 +796,11 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 				d_pfds[i].revents = 0;
 				continue;
 			}
+
+			// simulate POLLIN for the case that everything has been read from socket,
+			// but is parked inside internal buffers that require SSL_read() to be called
+			if (d_fd2state[i].state == STATE_SSL && (d_pfds[i].events & POLLIN) && SSL_pending(d_ssl) > 0)
+				d_pfds[i].revents |= POLLIN;
 
 			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
 
@@ -810,6 +877,7 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 			} else if (d_fd2state[i].state == STATE_SSL) {
 
 				d_pfds[i].events = POLLIN;
+				bool quic_read_write_want = 0;
 
 				if ((revents & POLLOUT) && !tx_empty(i)) {
 
@@ -818,11 +886,11 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 					auto sv = tx_string(i, seq, bk_str, d_chunk_size);
 
 					// keep sequenced packets for possible resend requests. 'seq' equals d_flow.tx_sequence
-					if (d_type == SOCK_DGRAM && seq != 0)
+					if (dtls() && seq != 0)
 						d_tx_map[d_flow.tx_sequence++] = bk_str;
 
 					// in DTLS case, set peer to that we known were the last good recv from
-					if (config::allow_roam && d_type == SOCK_DGRAM)
+					if (config::allow_roam && dgram())
 						BIO_ctrl(d_bio, BIO_CTRL_DGRAM_SET_PEER, 0, d_bio_peer);
 
 					ssize_t n = SSL_write(d_ssl, sv.c_str(), sv.size());
@@ -831,8 +899,16 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 						flush_fd(d_iob.master0(), tx_string_and_clear(d_iob.master0()));
 						return 0;
 					case SSL_ERROR_NONE:
+						break;
 					case SSL_ERROR_WANT_WRITE:
 					case SSL_ERROR_WANT_READ:
+						if (quic()) {
+							if (crash::SSL_net_write_desired(d_ssl))
+								d_pfds[i].events |= POLLOUT;
+							if (crash::SSL_net_read_desired(d_ssl))
+								d_pfds[i].events |= POLLIN;
+							quic_read_write_want = 1;
+						}
 						break;
 					default:
 						d_err = "server_session::handle::SSL_write:";
@@ -841,8 +917,8 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 						return -1;
 					}
 
-					// dgram data was already removed from queue by tx_string()
-					if (n > 0 && d_type == SOCK_STREAM)
+					// DTLS dgram data was already removed from queue by tx_string()
+					if (n > 0 && !dtls())
 						tx_remove(i, n);
 
 					d_last_ssl_qlen = tx_size(i);
@@ -853,22 +929,34 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 				if (!tx_empty(i))
 					d_pfds[i].events |= POLLOUT;
 
+				if (quic_read_write_want && quic())
+					continue;
+
 				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 
 					ssl_read_wants_write = 0;
 
 					ssize_t n = SSL_read(d_ssl, rbuf, sizeof(rbuf));
-					switch (SSL_get_error(d_ssl, n)) {
+					int ne = 0;
+					switch (ne = SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_NONE:
 						break;
 					case SSL_ERROR_ZERO_RETURN:
 						flush_fd(d_iob.master0(), tx_string_and_clear(d_iob.master0()));
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
-						d_pfds[i].events |= POLLOUT;
-						ssl_read_wants_write = 1;
-						break;
 					case SSL_ERROR_WANT_READ:
+						if (ne == SSL_ERROR_WANT_WRITE && !quic()) {
+							d_pfds[i].events |= POLLOUT;
+							ssl_read_wants_write = 1;
+						}
+						if (quic()) {
+							if (crash::SSL_net_write_desired(d_ssl))
+								d_pfds[i].events |= POLLOUT;
+							if (crash::SSL_net_read_desired(d_ssl))
+								d_pfds[i].events |= POLLIN;
+							quic_read_write_want = 1;
+						}
 						break;
 					default:
 						d_err = "server_session::handle::SSL_read:";
@@ -881,11 +969,18 @@ int server_session::handle(SSL_CTX *ssl_ctx)
 						d_fd2state[i].ibuf += string(rbuf, n);
 
 					// on successfull DTLS read, obtain last known address of peer sender
-					if (config::allow_roam && d_type == SOCK_DGRAM)
+					if (config::allow_roam && dgram())
 						BIO_ctrl(d_bio, BIO_CTRL_DGRAM_GET_PEER, 0, d_bio_peer);
 
 					while (handle_input(i) > 0);
 				}
+				if (quic_read_write_want && quic())
+					continue;
+
+				// quic_read_write_want might have set POLLOUT in an earlier cycle even when TX queue was empty, so we need
+				// to clear it when its no longer needed.
+				if (tx_empty(i) && !ssl_read_wants_write)
+					d_pfds[i].events &= ~POLLOUT;
 			}
 
 			if (d_fd2state[i].state < STATE_ACCEPT)
@@ -1118,7 +1213,7 @@ int server_session::handle_input(int i)
 
 	// peer suspended session
 	} else if (cmd.find("C:SPND:0", 6) == 6) {
-		if (d_type == SOCK_DGRAM && config::allow_roam) {
+		if (dgram() && config::allow_roam) {
 			if (suspend(cmd) < 0)
 				syslog().log("Suspend request received but failed to do so.");
 			cmd.clear();

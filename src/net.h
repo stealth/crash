@@ -144,6 +144,8 @@ int tcp_connect(const std::string &, const std::string &);
 
 int udp_connect(const std::string &, const std::string &);
 
+void nonblock(int);
+
 
 struct alignas(1) v4_tuple {
 	in_addr dst;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -79,12 +79,14 @@ enum {
 
 	MTU			=	1500,
 	MSS			=	1320,		// 'plain' with room for D/TLS record, transport and network hdrs + options
-	STDIN_BSIZE		=	MSS - SEQ_PSIZE - DATA_PSIZE,
+	QUIC_MSS		=	1200 - 80,	// 1200 as per RFC minus frame sizes. Must be < MSG_BSIZE
+	STDIN_BSIZE		=	MSS - SEQ_PSIZE - DATA_PSIZE,	// reduced size for QUIC plays no role, as QUIC is stream based although running on dgrams, so the prefix do not need to fit into a single dgram unlike for DTLS
 	PTY_BSIZE		=	MSS - SEQ_PSIZE - DATA_PSIZE,
 	SBUF_BSIZE		=	MSS - SEQ_PSIZE - NODE_PSIZE,
-	MSG_BSIZE		=	MSS,
+	MSG_BSIZE		=	MSS,		// used in authenticate() to send single chunk of data to fit into one packet for efficiency
 	CHUNK_SIZE		=	16638,
 	UDP_CHUNK_SIZE		=	MSS,
+	QUIC_CHUNK_SIZE		=	CHUNK_SIZE,
 	TCP_CHUNK_SIZE		=	CHUNK_SIZE,
 	STDOUT_CHUNK_SIZE	=	10*1024*1024,
 	RBUF_BSIZE		=	2*CHUNK_SIZE,
@@ -137,7 +139,7 @@ size_t prepend_seq(sequence_t, std::string &);
 
 size_t rnd_between(size_t, size_t);
 
-size_t pad_nops(std::string &);
+size_t pad_nops(std::string &, size_t);
 
 std::string ping_packet();
 

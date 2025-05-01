@@ -22,7 +22,10 @@ POSIX=-D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE=600
 # do not comment out if you want suspend/resume
 DEFS+=-DNO_DTLS_LISTEN
 
-#SSL=/opt/ssl/libressl-3.7.0
+# enable experimental QUIC transport
+#DEFS+=-DHAVE_QUIC
+
+#SSL=/opt/ssl/openssl-3.5.0-beta1
 
 ifeq ($(shell uname), Linux)
 	LIBS+=-lssl -lcrypto -Wl,--rpath=$(SSL)/lib -Wl,--rpath=$(SSL)/lib64

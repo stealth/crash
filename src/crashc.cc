@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2022 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,7 +51,7 @@ using namespace crash;
 void help(const char *p)
 {
 	printf("\nUsage:\t%s [-6] [-v] [-H host] [-p port] [-L [ip]:port] [-i auth keyfile]\n"
-	       "\t [-K server key/s] [-c cmd] [-S SNI] [-D] [-X IP] [-U lport:[ip]:rport]\n"
+	       "\t [-K server key/s] [-c cmd] [-S SNI] [-DQ] [-X IP] [-U lport:[ip]:rport]\n"
 	       "\t [-T lport:[ip]:rport] [-Y lport:SNI:[ip]:rport [-4 lport] [-5 lport]\n"
 	       "\t [-R b:m] [-N] [-x socks5://[ip]:port] [-t ticket] [-G str] <-l user>\n\n"
 	       "\t -6 -- use IPv6 instead of IPv4\n"
@@ -73,6 +73,7 @@ void help(const char *p)
 	       "\t -5 -- start SOCKS5 server on lport to forward TCP sessions\n"
 	       "\t -R -- traffic blinding level (0-9) and multiply factor, default 4:0\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
+	       "\t -Q -- use QUIC transport (requires -S)\n"
 	       "\t -S -- SNI to use\n"
 	       "\t -t -- ticket-file to use for suspend/resume\n"
 	       "\t -x -- use this SOCKS5 proxy when connecting\n"
@@ -101,7 +102,7 @@ int main(int argc, char **argv)
 	// in client mode we do not bind to a specific port by default
 	config::lport = "0";
 
-	while ((c = getopt(argc, argv, "6vhH:K:p:L:X:Y:l:i:c:R:T:U:5:4:S:x:DNt:G:")) != -1) {
+	while ((c = getopt(argc, argv, "6vhH:K:p:L:X:Y:l:i:c:R:T:U:5:4:S:x:QDNt:G:")) != -1) {
 		switch (c) {
 		case 'G':
 			config::disguise_secret = optarg;
@@ -111,6 +112,14 @@ int main(int argc, char **argv)
 			break;
 		case 'N':
 			config::socks5_dns = 1;
+			break;
+		case 'Q':
+#ifdef HAVE_QUIC
+			config::transport = "quic1";
+#else
+			fprintf(stderr, "QUIC mode not compiled in.\n");
+			exit(1);
+#endif
 			break;
 		case 'D':
 			config::transport = "dtls1";
@@ -215,7 +224,7 @@ int main(int argc, char **argv)
 	sa.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &sa, nullptr);
 
-	if (config::user.length() == 0 || (config::transport == "dtls1" && config::sni.empty()) ||
+	if (config::user.length() == 0 || ((config::transport == "dtls1" || config::transport == "quic1") && config::sni.empty()) ||
 	    (config::transport == "dtls1" && config::socks5_connect_proxy.size() > 0)) {
 		printf("\nMissing or invalid combination of options.\n");
 		help(*argv);
@@ -266,7 +275,7 @@ int main(int argc, char **argv)
 		config::traffic_flags |= TRAFFIC_INJECT;
 
 	if (config::verbose) {
-		fprintf(stderr, "\ncrypted admin shell (C) 2022 Sebastian Krahmer https://github.com/stealth/crash\n\n%s\n", ostr.c_str());
+		fprintf(stderr, "\ncrypted admin shell (C) 2025 Sebastian Krahmer https://github.com/stealth/crash\n\n%s\n", ostr.c_str());
 		fprintf(stderr, "crashc: starting crypted administration shell\n");
 		if (!config::host.empty())
 			fprintf(stderr, "crashc: connecting to [%s]:%s ...\n\n", config::host.c_str(), config::port.c_str());

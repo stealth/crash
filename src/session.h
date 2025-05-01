@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2024 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -63,8 +63,40 @@ class session {
 
 protected:
 
+	enum class transport_t : uint8_t {
+		TRANSPORT_TLS	= 1,
+		TRANSPORT_DTLS	= 2,
+		TRANSPORT_QUIC	= 3
+	};
+
+	bool dgram()
+	{
+		return d_type == SOCK_DGRAM;
+	}
+
+	bool stream()
+	{
+		return d_type == SOCK_STREAM;
+	}
+
+	bool quic()
+	{
+		return d_transport == transport_t::TRANSPORT_QUIC;
+	}
+
+	bool tls()
+	{
+		return d_transport == transport_t::TRANSPORT_TLS;
+	}
+
+	bool dtls()
+	{
+		return d_transport == transport_t::TRANSPORT_DTLS;
+	}
+
+
 	std::string d_err{""};
-	std::string d_transport{"tls1"}, d_sni{""}, d_ticket_file{""};
+	std::string d_transport_str{"tls1"}, d_sni{""}, d_ticket_file{""};
 
 	// keep sent packets in DGRAM case in a tx map for requested resends
 	// and keep rx packets that arrived out of order for later processing
@@ -111,13 +143,17 @@ protected:
 
 	time_t d_now{0};
 
+	size_t d_mss{MSS};
+
 	uint32_t d_net_cmd_flags{0};
 
 	int d_peer_fd{-1}, d_family{AF_INET}, d_type{SOCK_STREAM}, d_max_fd{0};
 
 	unsigned int d_chunk_size{TCP_CHUNK_SIZE};
 
-	uint16_t d_major{3}, d_minor{6};	// keep in-sync with server_session::d_banner
+	uint16_t d_major{3}, d_minor{1000};	// keep in-sync with server_session::d_banner
+
+	transport_t d_transport{transport_t::TRANSPORT_TLS};
 
 	// whether suspend signal was received, which needs different
 	// connection teardown in destructor
@@ -237,7 +273,7 @@ class server_session : public session {
 	SSL_CTX *d_ssl_ctx0{nullptr};	// not owning
 
 	std::string d_user{""}, d_cmd{""}, d_home{""}, d_shell{""}, d_peer_ip{""};
-	std::string d_banner{"1000 crashd-3.0006 OK\r\n"};	// keep in sync with d_major and d_minor
+	std::string d_banner{"1000 crashd-3.1000 OK\r\n"};	// keep in sync with d_major and d_minor
 
 	iobox d_iob;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2024 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -55,7 +55,7 @@ using namespace crash;
 
 void help(const char *p)
 {
-	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-D] [-H host] [-p port] [-A auth keys]\n"
+	printf("\nUsage:\t%s [-U] [-q] [-a] [-6] [-DQ] [-H host] [-p port] [-A auth keys]\n"
 	       "\t [-k server key-file] [-c server X509 cert] [-L [ip]:port] [-S SNI]\n"
 	       "\t [-t trigger-file] [-m trigger message] [-e] [-g good IPs] [-N] [-R]\n"
 	       "\t [-x socks5://[ip]:port] [-G method:prefix:action] [-w]\n\n"
@@ -79,6 +79,7 @@ void help(const char *p)
 	       "\t -m -- wait with connect/listen until message in file (-t) is seen\n"
 	       "\t -N -- disable TCP/UDP port forwarding\n"
 	       "\t -D -- use DTLS transport (requires -S)\n"
+	       "\t -Q -- use QUIC transport (requires -S)\n"
 	       "\t -x -- use this SOCKS5 proxy when using active connect\n"
 	       "\t -R -- allow clients to roam sessions\n"
 	       "\t -G -- Traffic Disguise Filters, check docu\n"
@@ -161,11 +162,11 @@ int main(int argc, char **argv)
 			printf("%s\r\n\r\n", argv[i]);
 	}
 
-	printf("\ncrypted admin shell (C) 2024 Sebastian Krahmer https://github.com/stealth/crash\n\n");
+	printf("\ncrypted admin shell (C) 2025 Sebastian Krahmer https://github.com/stealth/crash\n\n");
 
 	char ip[128] = {0}, lport[16] = {0}, prefix[128] = {0}, action[256] = {0};
 
-	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:DUweaS:NRG:")) != -1) {
+	while ((c = getopt(argc, argv, "6qhH:p:A:t:m:k:c:L:g:QDUweaS:NRG:")) != -1) {
 		switch (c) {
 		case 'G':
 			// The only method for now is "redirect1"
@@ -174,6 +175,14 @@ int main(int argc, char **argv)
 				config::disguise_secret = prefix;
 				config::disguise_action = action;
 			}
+			break;
+		case 'Q':
+#ifdef HAVE_QUIC
+			config::transport = "quic1";
+#else
+			fprintf(stderr, "QUIC mode not compiled in.\n");
+			exit(1);
+#endif
 			break;
 		case 'D':
 			config::transport = "dtls1";
@@ -253,7 +262,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (config::transport == "dtls1" && config::sni.empty()) {
+	if ((config::transport == "dtls1" || config::transport == "quic1") && config::sni.empty()) {
 		printf("Config error. DTLS option requires SNI. Exiting.\n\n");
 		return 1;
 	}

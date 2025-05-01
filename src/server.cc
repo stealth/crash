@@ -185,6 +185,8 @@ int Server::setup()
 	OpenSSL_add_all_digests();
 	if (d_transport == "dtls1")
 		d_ssl_method = DTLS_server_method();
+	else if (d_transport == "quic1")
+		d_ssl_method = OSSL_QUIC_server_method();
 	else
 		d_ssl_method = TLS_server_method();
 
@@ -249,7 +251,7 @@ int Server::setup()
 #endif
 	}
 
-	if (SSL_CTX_set_min_proto_version(d_ssl_ctx, min_vers) != 1) {
+	if (d_transport != "quic1" && SSL_CTX_set_min_proto_version(d_ssl_ctx, min_vers) != 1) {
 		d_err = "Server::setup::SSL_CTX_set_min_proto_version():";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
@@ -262,7 +264,7 @@ int Server::setup()
 			ciphers.erase(dhe, 4);
 	}
 
-	if (SSL_CTX_set_cipher_list(d_ssl_ctx, ciphers.c_str()) != 1) {
+	if (d_transport != "quic1" && SSL_CTX_set_cipher_list(d_ssl_ctx, ciphers.c_str()) != 1) {
 		d_err = "Server::setup::SSL_CTX_set_cipher_list:";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
@@ -339,14 +341,14 @@ int Server::loop()
 
 				now = time(nullptr);
 
-				// TLS Record Layer: ContentType == handshake (22)
-				if (now - last_accept <= d_min_time_between_reconnect || c != 22) {
+				// TLS Record Layer: ContentType == handshake (22), or QUIC
+				if (now - last_accept <= d_min_time_between_reconnect || (c != 22 && (c & 0xc0) != 0xc0)) {
 					char buf[4096] = {0};
 					recv(d_sock_fd, buf, sizeof(buf), 0);
 					continue;
 				}
 
-				// dup() it, to emulate kind of accept() and we do not need to handle DGRAM differently in child
+				// dup() it, to kind of emulate accept() and we do not need to handle DGRAM differently in child
 				peer_fd = dup(d_sock_fd);
 
 				// in UDP mode, set the address where data is sent from and received from

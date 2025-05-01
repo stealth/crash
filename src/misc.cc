@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2024 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -148,23 +148,21 @@ size_t rnd_between(size_t min, size_t max)
 }
 
 
-size_t pad_nops(string &s)
+size_t pad_nops(string &s, size_t PMAX_SIZE)
 {
 
-	if (config::traffic_flags & TRAFFIC_NOPAD)
+	if (config::traffic_flags & TRAFFIC_NOPAD || PMAX_SIZE > MSS || PMAX_SIZE < QUIC_MSS || s.size() > MSS)
 		return 0;
 
-	const uint8_t nop_fix = 5 + 6;	// %05hu:C:NO:
+	const size_t nop_fix = 5 + 6;	// %05hu:C:NO:
 
 	const auto l = s.size();
-	int pads = 0;
-
-	enum { PMAX_SIZE = MSS };
+	size_t pads = 0;
 
 	if (l + nop_fix >= PMAX_SIZE)
 		return 0;
 
-	char zeros[PMAX_SIZE] = {0};
+	char zeros[MSS] = {0};
 
 	if (config::traffic_flags & TRAFFIC_PADMAX) {
 		pads = PMAX_SIZE - l - nop_fix;

@@ -53,14 +53,25 @@ namespace crash {
 
 
 session::session(const string &t, const string &sni)
-	: d_transport(t), d_sni(sni)
+	: d_transport_str(t), d_sni(sni)
 {
-	if (d_transport == "dtls1") {
+	if (d_transport_str == "dtls1") {
+		d_transport = transport_t::TRANSPORT_DTLS;
 		d_type = SOCK_DGRAM;
 		d_chunk_size = UDP_CHUNK_SIZE;
 		d_poll_to.max = d_poll_to.next = UDP_POLL_TO;
 		d_bio_peer = BIO_ADDR_new();
 	}
+
+	if (d_transport_str == "quic1") {
+		d_transport = transport_t::TRANSPORT_QUIC;
+		d_type = SOCK_DGRAM;
+		d_chunk_size = QUIC_CHUNK_SIZE;
+		d_poll_to.max = d_poll_to.next = TCP_POLL_TO;
+		d_bio_peer = BIO_ADDR_new();
+		d_mss = QUIC_MSS;
+	}
+
 	d_now = time(nullptr);
 }
 
@@ -75,6 +86,9 @@ session::~session()
 	// will only free (downref) its copies
 	BIO_free(d_bio);
 
+	if (quic())
+		crash::SSL_stream_conclude(d_ssl, 0);
+
 	if (d_ssl) {
 		SSL_shutdown(d_ssl);
 		SSL_free(d_ssl);
@@ -84,7 +98,7 @@ session::~session()
 	if (d_privkey)
 		EVP_PKEY_free(d_privkey);
 
-	if (d_type == SOCK_STREAM)
+	if (stream())
 		shutdown(d_peer_fd, SHUT_RDWR);
 
 	if (d_fd2state) {
@@ -110,7 +124,7 @@ int session::tx_add_mult(int fd, const string &s)
 		for (uint32_t i = 1; i < config::traffic_multiply; ++i) {
 			string np = "";
 
-			if (pad_nops(np) > 0)
+			if (pad_nops(np, d_mss) > 0)
 				tx_add(fd, np);
 		}
 	}
@@ -123,7 +137,7 @@ int session::tx_add(int fd, const string &s)
 {
 	d_fd2state[fd].tx_len += s.size();
 
-	if (d_fd2state[fd].state == STATE_SSL && d_type == SOCK_DGRAM) {
+	if (d_fd2state[fd].state == STATE_SSL && dtls()) {
 		d_fd2state[fd].ovec.push_back(s);
 	} else {
 		if (d_fd2state[fd].ovec.empty())
@@ -142,8 +156,8 @@ int session::tx_remove(int fd, string::size_type n)
 	if (d_fd2state[fd].ovec.empty())
 		return 0;
 
-	if (d_fd2state[fd].state == STATE_SSL && d_type == SOCK_DGRAM) {
-		return 0;	// No removing of dgram data. It was already removed by tx_string().
+	if (d_fd2state[fd].state == STATE_SSL && dtls()) {
+		return 0;	// No removing of DTLS dgram data. It was already removed by tx_string().
 	} else {
 		d_fd2state[fd].ovec[0].erase(0, n);
 	}
@@ -176,13 +190,15 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 	// only SSL sockets need special treatments of dgram/stream/sequenced packets,
 	// other out-buffers such as for pty, stdout etc just get the plain data
 	if (d_fd2state[fd].state == STATE_SSL) {
-		if (d_type == SOCK_STREAM) {
+
+		// Only DTLS needs own sequencing and retries
+		if (!dtls()) {
 			// Only pad if since last padding new payload data was added to queue.
 			// As there is only one socket (d_peer_fd) where we pad outgoing data,
 			// one variable (d_last_ssl_qlen) is sufficient and we don't need to have
 			// a variable inside d_fd2state.
 			if (d_last_ssl_qlen < d_fd2state[fd].ovec[0].size())
-				d_fd2state[fd].tx_len += pad_nops(d_fd2state[fd].ovec[0]);
+				d_fd2state[fd].tx_len += pad_nops(d_fd2state[fd].ovec[0], d_mss);
 
 			if (d_fd2state[fd].ovec[0].size() > max)
 				sv = { d_fd2state[fd].ovec[0].c_str(), max };
@@ -208,7 +224,7 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 					break;
 			}
 
-			// In dgram case the data is immediately removed from queueing by tx_string(),
+			// In DTLS case the data is immediately removed from queueing by tx_string(),
 			// since SSL socket will be blocking and not writing partial
 			// (it is either written at once or not at all) and the final dgram will be kept
 			// in d_tx_map<> for a possible resend. This makes modding the ovec[] with :PN:...
@@ -223,9 +239,9 @@ session::strview session::tx_string(int fd, sequence_t &seq, string &bk_str, str
 
 			// If it was a single NOP pkt, its already padded
 			if (!nop_only)
-				pad_nops(bk_str);
+				pad_nops(bk_str, d_mss);
 
-			// dgram case needs to have strview of backing string returned, as content was removed from ovec
+			// DTLS case needs to have strview of backing string returned, as content was removed from ovec
 			return sv = bk_str;
 		}
 	} else {
@@ -283,7 +299,7 @@ void session::tx_clear(int fd)
 bool session::tx_can_add(int fd)
 {
 	// only send new dgrams if peer acknowledged us ours within a certain window (peer's RX# is our TX#)
-	return (d_type == SOCK_STREAM || (d_flow.tx_sequence - d_flow.last_rx_seen <= MAX_OVEC_SIZE));
+	return (tls() || quic() || (d_flow.tx_sequence - d_flow.last_rx_seen <= MAX_OVEC_SIZE));
 }
 
 
@@ -336,7 +352,7 @@ int session::handle_input(int i)
 	if (cmd.size() < 5 + len)	// 5bytes %05hu + :C:...
 		return 0;
 
-	if (d_type == SOCK_DGRAM && cmd.find("C:SQ:", 6) == 6) {
+	if (dtls() && cmd.find("C:SQ:", 6) == 6) {
 		sequence_t peer_rx = 0, peer_tx = 0;
 		if (sscanf(cmd.c_str() + 5, ":C:SQ:%016llx:%016llx:", &peer_rx, &peer_tx) == 2) {
 
@@ -356,7 +372,7 @@ int session::handle_input(int i)
 		}
 
 	// packet seq number as added by prepend_seq()
-	} else if (d_type == SOCK_DGRAM && cmd.find("C:PN:", 6) == 6) {
+	} else if (dtls() && cmd.find("C:PN:", 6) == 6) {
 		sequence_t seq = 0;
 		if (sscanf(cmd.c_str() + 5, ":C:PN:%016llx:", &seq) == 1) {
 

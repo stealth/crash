@@ -294,8 +294,7 @@ static int listen(int type, const string &ip, const string &port)
 	if ((sock_fd = socket(ai->ai_family, type, 0)) < 0)
 		return -1;
 
-	int flags = fcntl(sock_fd, F_GETFL);
-	fcntl(sock_fd, F_SETFL, flags|O_NONBLOCK);
+	nonblock(sock_fd);
 
 	int one = 1;
 #ifdef SO_REUSEPORT
@@ -378,8 +377,7 @@ static int connect(int type, const string &name, const string &port)
 	if (type == SOCK_STREAM)
 		setsockopt(sock_fd, IPPROTO_TCP, TCP_NODELAY, &one, len);
 
-	int flags = fcntl(sock_fd, F_GETFL);
-	fcntl(sock_fd, F_SETFL, flags|O_NONBLOCK);
+	nonblock(sock_fd);
 
 	if (::connect(sock_fd, tai->ai_addr, tai->ai_addrlen) < 0 && errno != EINPROGRESS) {
 		close(sock_fd);
@@ -401,6 +399,13 @@ int udp_connect(const string &ip, const string &port)
 int tcp_connect(const string &ip, const string &port)
 {
 	return connect(SOCK_STREAM, ip, port);
+}
+
+
+void nonblock(int fd)
+{
+	int flags = fcntl(fd, F_GETFL);
+	fcntl(fd, F_SETFL, flags|O_NONBLOCK);
 }
 
 

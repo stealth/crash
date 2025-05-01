@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2024 Sebastian Krahmer.
+ * Copyright (C) 2009-2025 Sebastian Krahmer.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/time.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -117,8 +118,11 @@ int client_session::setup()
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
 	OpenSSL_add_all_digests();
-	if (d_type == SOCK_DGRAM)
+
+	if (dtls())
 		d_ssl_method = DTLS_client_method();
+	else if (quic())
+		d_ssl_method = crash::OSSL_QUIC_client_method();	// requires us to call the tick function within the poll() loop
 	else
 		d_ssl_method = TLS_client_method();
 
@@ -128,7 +132,7 @@ int client_session::setup()
 	}
 
 	if (!d_ssl_method) {
-		d_err = "client_session::setup::TLS_client_method:";
+		d_err = "client_session::setup: Unable to get transport layer.";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
 	}
@@ -145,7 +149,7 @@ int client_session::setup()
 
 	long op = SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET|SSL_OP_NO_QUERY_MTU;
 
-	if (d_type == SOCK_DGRAM)
+	if (dtls())
 
 #ifdef SSL_OP_NO_COMPRESSION
 	op |= SSL_OP_NO_COMPRESSION;
@@ -164,10 +168,10 @@ int client_session::setup()
 	int min_vers = TLS1_3_VERSION;
 #endif
 
-	if (d_type == SOCK_DGRAM)
+	if (dtls())
 		min_vers = DTLS1_2_VERSION;
 
-	if (SSL_CTX_set_min_proto_version(d_ssl_ctx, min_vers) != 1) {
+	if (!quic() && SSL_CTX_set_min_proto_version(d_ssl_ctx, min_vers) != 1) {
 		d_err = "Server::setup::SSL_CTX_set_min_proto_version():";
 		d_err += ERR_error_string(ERR_get_error(), nullptr);
 		return -1;
@@ -187,7 +191,7 @@ int client_session::setup()
 
 #ifndef BORINGSSL_API_VERSION
 	// DTLS_set_link_mtu(d_ssl, MTU) on openssl
-	if (d_type == SOCK_DGRAM)
+	if (dgram())
 		SSL_ctrl(d_ssl, SSL_CTRL_SET_MTU, MTU, 0);
 #endif
 
@@ -224,7 +228,7 @@ int client_session::setup()
 		return -1;
 	}
 
-	if (config::host.length() == 0 && d_transport == "tls1") {
+	if (config::host.length() == 0 && tls()) {
 		int sock_fd = 0;
 		if ((sock_fd = sock->blisten(config::laddr, config::lport)) < 0) {
 			d_err = "client_session::setup::";
@@ -248,8 +252,8 @@ int client_session::setup()
 			return -1;
 		}
 
-		if (d_transport == "tls1") {
-			if (!config::socks5_connect_proxy.empty() && d_transport == "tls1")
+		if (tls()) {
+			if (!config::socks5_connect_proxy.empty())
 				sock->socks5(config::socks5_connect_proxy, config::socks5_connect_proxy_port);
 
 			// need to dup, since we are owner of d_peer_fd but connect() returns sock owned fd
@@ -285,8 +289,15 @@ int client_session::setup()
 				wport = reinterpret_cast<const sockaddr_in6 *>(tai->ai_addr)->sin6_port;
 				wlen = sizeof(in6_addr);
 			}
+
 			crash::BIO_ADDR_rawmake(d_bio_peer, d_family, where, wlen, wport);
 			freeaddrinfo(tai);
+
+			// for QUIC, fd needs to be non-blocking but we need blocking app layer until connect/accept is done
+			if (quic()) {
+				nonblock(d_peer_fd);
+				crash::SSL_set_blocking_mode(d_ssl, 1);
+			}
 		}
 	} else {
 		d_err = "client_session::setup: Not possible to do passive connect in UDP client mode.";
@@ -405,7 +416,7 @@ int client_session::check_server_key()
 
 int client_session::authenticate()
 {
-	// At this point we have blocking SSL I/O
+	// At this point we have blocking SSL
 
 	if (!d_disguise_prefix.empty()) {
 		rewrite1: ssize_t n = SSL_write(d_ssl, d_disguise_prefix.c_str(), d_disguise_prefix.size());
@@ -423,8 +434,11 @@ int client_session::authenticate()
 	}
 
 	char rbuf[MSG_BSIZE + 1] = {0};
+	size_t rblen = MSG_BSIZE;
+	if (quic())
+		rblen = QUIC_MSS;
 
-	reread: ssize_t r = SSL_read(d_ssl, rbuf, sizeof(rbuf));
+	reread: ssize_t r = SSL_read(d_ssl, rbuf, rblen);
 	switch (SSL_get_error(d_ssl, r)) {
 	case SSL_ERROR_NONE:
 		break;
@@ -508,18 +522,23 @@ int client_session::authenticate()
 		return -1;
 
 	char sbuf[MSG_BSIZE] = {0};
-	snprintf(sbuf, sizeof(sbuf), "A:crash-%hu.%04hu:sign2:rsa1:%32s:%hu:%s:token:%hu:",
+	size_t sblen = sizeof(sbuf);
+	if (quic())
+		sblen = QUIC_MSS;
+
+	snprintf(sbuf, sblen, "A:crash-%hu.%04hu:sign2:rsa1:%32s:%hu:%s:token:%hu:",
 	         d_major, d_minor, config::user.c_str(),
 	         (unsigned short)config::cmd.length(), config::cmd.c_str(),
 	         (unsigned short)resplen);
 	size_t apkt_len = strlen(sbuf);
-	if (resplen > sizeof(sbuf) - apkt_len)
+	if (resplen > sblen - apkt_len)
 		return -1;
 	memcpy(sbuf + apkt_len, resp, resplen);
 	apkt_len += resplen;
 
-	// blind real packet len when sending
-	rewrite2: ssize_t n = SSL_write(d_ssl, sbuf, rnd_between(apkt_len, sizeof(sbuf)));
+	// Packet len can't be blinded, otherwise follow-up packets could be accumulated by
+	// transport stack and fill gap on peer buffers thats expecting "too much"
+	rewrite2: ssize_t n = SSL_write(d_ssl, sbuf, sblen);
 	switch (SSL_get_error(d_ssl, n)) {
 		case SSL_ERROR_NONE:
 			break;
@@ -621,7 +640,7 @@ int client_session::handle()
 			fprintf(stderr, "crashc: Using SNI instead of banner. No major/minor version check.\n");
 	}
 
-	if (d_type == SOCK_DGRAM) {
+	if (dgram()) {
 		d_bio = BIO_new_dgram(d_peer_fd, BIO_NOCLOSE);
 		BIO_ctrl(d_bio, BIO_CTRL_DGRAM_SET_PEER, 0, d_bio_peer);
 	} else
@@ -656,6 +675,23 @@ int client_session::handle()
 			return -1;
 		}
 		SSL_SESSION_free(session);
+	}
+
+	if (quic()) {
+		unsigned char alpn[] = {
+		8, 'h', 't', 't', 'p', '/', '1', '.', '1',
+		2, 'h', '2'
+		};
+		if (crash::SSL_set_alpn_protos(d_ssl, alpn, sizeof(alpn)) != 0) {
+			d_err = "client_session::SSL_set_alpn_protos:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
+		if (crash::SSL_set1_initial_peer_addr(d_ssl, d_bio_peer) != 1) {
+			d_err = "client_session::SSL_set1_initial_peer_addr:";
+			d_err += ERR_error_string(ERR_get_error(), nullptr);
+			return -1;
+		}
 	}
 
 	if (SSL_connect(d_ssl) <= 0) {
@@ -785,12 +821,15 @@ int client_session::handle()
 		d_fd2state[config::socks4_fd].state = STATE_SOCKS4_ACCEPT;
 	}
 
-	// only now set non-blocking mode and moving write buffers
-	if (d_type == SOCK_STREAM) {
-		int flags = fcntl(d_peer_fd, F_GETFL);
-		fcntl(d_peer_fd, F_SETFL, flags|O_NONBLOCK);
+	// Only now set non-blocking mode and moving write buffers. Not necessary for QUIC on the fd layer, as it already happened.
+	if (tls())
+		nonblock(d_peer_fd);
+
+	if (!dtls())
 		SSL_set_mode(d_ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
-	}
+
+	if (quic())
+		crash::SSL_set_blocking_mode(d_ssl, 0);
 
 	d_max_fd = d_peer_fd;
 
@@ -852,11 +891,22 @@ int client_session::handle()
 		RAND_bytes(reinterpret_cast<unsigned char *>(&u16), 2);
 		d_poll_to.next = d_poll_to.min + u16 % d_poll_to.max;
 
-		if (d_type == SOCK_DGRAM && ((r == 0 && tx_empty(d_peer_fd)) || tx_must_add_sq(d_peer_fd)))
+		// This is the session and d_ssl valid, so in each cycle call the OpenSSL QUIC tick function if necessary so we
+		// can use OSSL_QUIC_client_method() instead of OSSL_QUIC_client_thread_method()
+		if (quic()) {
+			int infinite = 0;
+			timeval tv;
+			memset(&tv, 0, sizeof(tv));
+			crash::SSL_get_event_timeout(d_ssl, &tv, &infinite);
+			if (tv.tv_sec == 0 && tv.tv_usec <= d_poll_to.next && infinite == 0)
+				crash::SSL_handle_events(d_ssl);
+		}
+
+		if (dtls() && ((r == 0 && tx_empty(d_peer_fd)) || tx_must_add_sq(d_peer_fd)))
 			tx_add_sq(d_peer_fd);
 
 		// simulate some typing if configured so
-		if (d_type == SOCK_STREAM && r == 0 && ((config::traffic_flags & TRAFFIC_INJECT) && tx_empty(d_peer_fd))) {
+		if (!dtls() && r == 0 && ((config::traffic_flags & TRAFFIC_INJECT) && tx_empty(d_peer_fd))) {
 			tx_add(d_peer_fd, ping_packet());
 			d_pfds[d_peer_fd].revents |= POLLOUT;
 		}
@@ -885,6 +935,11 @@ int client_session::handle()
 				d_pfds[i].revents = 0;
 				continue;
 			}
+
+			// simulate POLLIN for the case that everything has been read from socket,
+			// but is parked inside internal buffers that require SSL_read() to be called
+			if (d_fd2state[i].state == STATE_SSL && (d_pfds[i].events & POLLIN) && SSL_pending(d_ssl) > 0)
+				d_pfds[i].revents |= POLLIN;
 
 			if (d_pfds[i].revents & (POLLERR|POLLHUP|POLLNVAL)) {
 				if (d_fd2state[i].state == STATE_SSL) {
@@ -958,6 +1013,8 @@ int client_session::handle()
 
 				d_pfds[i].events = POLLIN;
 
+				bool quic_read_write_want = 0;
+
 				if ((revents & POLLOUT) && !tx_empty(i)) {
 
 					// obtains properly padded, sized and sequenced string for the STATE_SSL case
@@ -966,7 +1023,7 @@ int client_session::handle()
 					auto sv = tx_string(i, seq, bk_str, d_chunk_size);
 
 					// keep sequenced packets for possible resend requests
-					if (d_type == SOCK_DGRAM && seq != 0)
+					if (dtls() && seq != 0)
 						d_tx_map[d_flow.tx_sequence++] = bk_str;
 
 					ssize_t n = SSL_write(d_ssl, sv.c_str(), sv.size());
@@ -976,8 +1033,16 @@ int client_session::handle()
 						flush_fd(2, tx_string_and_clear(2));
 						return 0;
 					case SSL_ERROR_NONE:
+						break;
 					case SSL_ERROR_WANT_WRITE:
 					case SSL_ERROR_WANT_READ:
+						if (quic()) {
+							if (crash::SSL_net_write_desired(d_ssl))
+								d_pfds[i].events |= POLLOUT;
+							if (crash::SSL_net_read_desired(d_ssl))
+								d_pfds[i].events |= POLLIN;
+							quic_read_write_want = 1;
+						}
 						break;
 					default:
 						d_err = "client_session::handle::SSL_write:";
@@ -986,11 +1051,12 @@ int client_session::handle()
 						flush_fd(2, tx_string_and_clear(2));
 
 						// do not error for DGRAMs, as it could be temporarily missing link
-						if (d_type == SOCK_STREAM)
+						if (tls())
 							return -1;
 					}
-					// dgram data was already removed by tx_string() before
-					if (n > 0 && d_type == SOCK_STREAM)
+
+					// DTLS dgram data was already removed by tx_string() before
+					if (n > 0 && !dtls())
 						tx_remove(i, n);
 
 					d_last_ssl_qlen = tx_size(i);
@@ -1001,12 +1067,16 @@ int client_session::handle()
 				if (!tx_empty(i))
 					d_pfds[i].events |= POLLOUT;
 
+				if (quic_read_write_want && quic())
+					continue;
+
 				if ((revents & POLLIN) || (ssl_read_wants_write && (revents & POLLOUT))) {
 
 					ssl_read_wants_write = 0;
 
 					ssize_t n = SSL_read(d_ssl, rbuf, sizeof(rbuf));
-					switch (SSL_get_error(d_ssl, n)) {
+					int ne = 0;
+					switch (ne = SSL_get_error(d_ssl, n)) {
 					case SSL_ERROR_NONE:
 						break;
 					case SSL_ERROR_ZERO_RETURN:
@@ -1014,10 +1084,18 @@ int client_session::handle()
 						flush_fd(2, tx_string_and_clear(2));
 						return 0;
 					case SSL_ERROR_WANT_WRITE:
-						d_pfds[i].events |= POLLOUT;
-						ssl_read_wants_write = 1;
-						break;
 					case SSL_ERROR_WANT_READ:
+						if (ne == SSL_ERROR_WANT_WRITE && !quic()) {
+							d_pfds[i].events |= POLLOUT;
+							ssl_read_wants_write = 1;
+						}
+						if (quic()) {
+							if (crash::SSL_net_write_desired(d_ssl))
+								d_pfds[i].events |= POLLOUT;
+							if (crash::SSL_net_read_desired(d_ssl))
+								d_pfds[i].events |= POLLIN;
+							quic_read_write_want = 1;
+						}
 						break;
 					default:
 						d_err = "client_session::handle::SSL_read:";
@@ -1032,6 +1110,13 @@ int client_session::handle()
 
 					while (handle_input(d_peer_fd) > 0);
 				}
+				if (quic_read_write_want && quic())
+					continue;
+
+				// quic_read_write_want might have set POLLOUT in an earlier cycle even when TX queue was empty, so we need
+				// to clear it when its no longer needed.
+				if (tx_empty(i) && !ssl_read_wants_write)
+					d_pfds[i].events &= ~POLLOUT;
 			}
 
 			if (d_fd2state[i].state < STATE_ACCEPT)
